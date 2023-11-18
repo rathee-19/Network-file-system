@@ -25,8 +25,12 @@ void cache_path(cache_t* cache, storage_t* ss, char* path) {
 }
 
 storage_t* cache_retrieve(cache_t* cache, char* path) {
+    int found=0;
+
     for(int i=0;i<NUM_CACHED;i++) {
         if(strcmp(cache->paths[i], path)==0) {
+            found=1;
+
             int current_position=i;
             while(current_position==(cache->available-1+NUM_CACHED)%NUM_CACHED) {
                 char* selected=cache->paths[current_position];
@@ -39,9 +43,15 @@ storage_t* cache_retrieve(cache_t* cache, char* path) {
 
                 current_position=(current_position+1)%NUM_CACHED;
             }
+
             break;
         }
     }
 
-    return cache->storage_servers[(cache->available-1+NUM_CACHED)%NUM_CACHED];
+    if(found==1) {
+        return cache->storage_servers[(cache->available-1+NUM_CACHED)%NUM_CACHED];
+    }
+    else {
+        return NULL;
+    }
 }
