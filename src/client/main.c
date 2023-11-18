@@ -42,6 +42,7 @@ int main(void)
       case 'Q':
         goto ret_main;
       default:
+        printf("Invalid message\n");
         continue;
     }
   }

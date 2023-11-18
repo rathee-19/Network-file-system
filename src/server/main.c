@@ -6,6 +6,7 @@
  * storage server failure detection (allow only read)
  * asynchronous duplication
  * redundancy, replication and recovery ??
+ * add functionality for differentiating between the redundant copies of different ss in other ss
 */
 
 #include "defs.h"
@@ -42,11 +43,13 @@ int main(void)
     int port = ntohs(req->addr.sin_port);
     inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
     fprintf_t(stdout, "Accepted connection from %s/%d\n", ip, port);
+    log("Accepted connection from %s/%d\n");
 
     recv_tx(req->sock, &(req->msg), sizeof(req->msg), 0);
     switch(req->msg.type)
     {
       case CREATE_DIR:
+        log("Received request to create diretory.\n");
         pthread_create_tx(&worker, NULL, handle_createdir, req); break;
       case CREATE_FILE:
         pthread_create_tx(&worker, NULL, handle_createfile, req); break;
@@ -68,6 +71,7 @@ int main(void)
   }
 
   close_tx(sock);
+  log("Server stopped\n");
   
   return 0;
 }

@@ -46,4 +46,7 @@ void init_cache(cache_t* cache);
 void cache_path(cache_t* cache, storage_t* ss, char* path);
 storage_t* cache_retrieve(cache_t* cache, char* path);
 
+// logs.c
+void log(const char* message);
+
 #endif
