@@ -30,6 +30,9 @@
 #define BUFSIZE 4096             // assumption: greater than PATH_MAX, 4096
 #define RETRY 5                  // ... seconds
 
+#define NUM_CACHED 20            // number of location entries to be cached
+#define PATH_MAX 4096            // maximum path length allowed
+
 typedef struct __message {
   int32_t type;
   char data[BUFSIZE];

@@ -20,6 +20,13 @@ typedef struct __request {
   message_t msg;
 } request_t;
 
+typedef struct __cache {
+  char* paths[NUM_CACHED];
+  storage_t* storage_servers[NUM_CACHED];
+  int latest;
+  int available;
+} cache_t;
+
 // client.c
 void* handle_createdir(void* arg);
 void* handle_createfile(void* arg);
