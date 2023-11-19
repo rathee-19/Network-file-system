@@ -20,7 +20,7 @@ int main(void)
 
   while (1)
   {
-    printf("\n==> [R]ead [W]rite [C]reate [D]elete [I]nfo [L]ist [Q]uit\n");
+    printf("\n==> [R]ead [W]rite [C]reate [D]elete [I]nfo [L]ist [P]hotocopy [Q]uit\n");
     printf("==> Operation to request: ");
     scanf(" %c", &op);
     op = toupper(op);
@@ -39,6 +39,8 @@ int main(void)
         request_info(); break;
       case 'L':
         request_list(); break;
+      case 'P':
+        request_copy(); break;
       case 'Q':
         goto ret_main;
       default:
@@ -79,7 +81,7 @@ void request_read(void)
     case NOTFOUND:
       fprintf(stderr, "%s was not found.\n", path); return;
     case PERM:
-      fprintf(stderr, "Missing permissions for delete.\n"); return;
+      fprintf(stderr, "Missing permissions for delete.\n"); return;             // ????????????????????
     default:
       invalid_response(msg.type); return;
   }
@@ -436,6 +438,75 @@ ret_info:
 void request_list(void)
 {
   // TODO: after setting up the data structure
+}
+
+void request_copy(void) {
+  message_t srcmsg;
+  srcmsg.type = COPY;
+  bzero(srcmsg.data, BUFSIZE);
+
+  char srcpath[PATH_MAX];
+  printf("==> Source Path: ");
+  scanf(" %[^\n]s", srcpath);
+  strcpy(srcmsg.data, srcpath);
+
+  send_tx(sock, &srcmsg, sizeof(srcmsg), 0);
+  #ifdef DEBUG
+  printf("Sent src path message to naming server\n");
+  #endif
+  recv_tx(sock, &srcmsg, sizeof(srcmsg), 0);
+
+  switch(srcmsg.type) {
+    case COPY+1:
+    case NOTFOUND:
+      fprintf(stderr, "%s was not found.\n", srcpath); break;
+    default:
+      invalid_response(srcmsg.type);
+  }
+
+  message_t destmsg;
+  destmsg.type = READ;
+  bzero(destmsg.data, BUFSIZE);
+
+  char destpath[PATH_MAX];
+  printf("==> Destnation Path: ");
+  scanf(" %[^\n]s", destpath);
+  strcpy(destmsg.data, destpath);
+
+  send_tx(sock, &destmsg, sizeof(destmsg), 0);
+  #ifdef DEBUG
+  printf("Sent dest path message to naming server\n");
+  #endif
+  recv_tx(sock, &destmsg, sizeof(destmsg), 0);
+
+  switch(destmsg.type) {
+    case COPY+1:
+      break;
+    case NOTFOUND:
+      fprintf(stderr, "%s was not found.\n", destpath); break;
+    default:
+      invalid_response(destmsg.type);
+  }
+
+  message_t flagmsg;
+  flagmsg.type = READ;
+  bzero(flagmsg.data, BUFSIZE);
+
+  char flag[BUFSIZE];
+  snprintf(flag, "%s", "COPY_COND");
+
+  send_tx(sock, &flagmsg, sizeof(flagmsg), 0);
+  #ifdef DEBUG
+  printf("Sent flag message to naming server\n");
+  #endif
+  recv_tx(sock, &flagmsg, sizeof(flagmsg), 0);
+
+  switch(flagmsg.type) {
+    case COPY+1:
+      break;
+    default:
+      invalid_response(flagmsg.type);
+  }
 }
 
 void invalid_response(int resp)

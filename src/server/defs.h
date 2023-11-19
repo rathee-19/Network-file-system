@@ -13,6 +13,8 @@
 #include "../common/list.h"
 #include "../common/utilities.h"
 
+#include <strings.h>
+
 typedef struct __request {
   int sock;
   struct sockaddr_in addr;
