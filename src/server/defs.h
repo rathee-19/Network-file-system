@@ -34,6 +34,7 @@ void* handle_delete(void* arg);
 void* handle_info(void* arg);
 void* handle_invalid(void* arg);
 void* handle_list(void* arg);
+void* handle_copy(void* arg);
 
 // storage.c
 void* stping(void* arg);
@@ -41,10 +42,14 @@ void* handle_join(void* arg);
 void* handle_read(void* arg);
 void* handle_write(void* arg);
 
+list_t storage;
+
 // LRU.c
 void init_cache(cache_t* cache);
 void cache_path(cache_t* cache, storage_t* ss, char* path);
 storage_t* cache_retrieve(cache_t* cache, char* path);
+
+cache_t server_cache;
 
 // logs.c
 void log(const char* message);

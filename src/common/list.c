@@ -37,3 +37,32 @@ void delete(list_t *L, snode_t *x)
 
   free(x);
 }
+
+int get_number(list_t* L) {
+  int num_elements=0;
+
+  snode_t* node=L->head->next;
+
+  do {
+    num_elements++;
+    node = node->next;
+  } while(node != L->head);
+
+  return num_elements;
+}
+
+int search(list_t* L, storage_t* st) {
+  int result=0;
+
+  snode_t* node=L->head->next;
+
+  while(node!=L->head) {
+    if(node->st.nsport!=st->nsport) {
+      result=1;
+      break;
+    }
+    node-node->next;
+  }
+
+  return result;
+}

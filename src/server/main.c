@@ -6,16 +6,17 @@
  * storage server failure detection (allow only read)
  * asynchronous duplication
  * redundancy, replication and recovery ??
+ * the above two are basically automated calls to the copy function with the BACKUP_COND, the problem is the selection of ss to do that
  * add functionality for differentiating between the redundant copies of different ss in other ss
 */
 
 #include "defs.h"
 
-list_t storage;
-
 int main(void)
 {
   init_list(&storage);
+
+  init_cache(&server_cache);
 
   pthread_t ping;
   pthread_create_tx(&ping, NULL, stping, NULL);
@@ -49,7 +50,7 @@ int main(void)
     switch(req->msg.type)
     {
       case CREATE_DIR:
-        log("Received request to create diretory.\n");
+        log("Received request to create directory.\n");
         pthread_create_tx(&worker, NULL, handle_createdir, req); break;
       case CREATE_FILE:
         pthread_create_tx(&worker, NULL, handle_createfile, req); break;
@@ -65,6 +66,8 @@ int main(void)
         pthread_create_tx(&worker, NULL, handle_join, req); break;
       case WRITE:
         pthread_create_tx(&worker, NULL, handle_write, req); break;
+      case COPY:
+        pthread_create_tx(&worker, NULL, handle_copy, req); break;
       default:
         pthread_create_tx(&worker, NULL, handle_invalid, req);
     }

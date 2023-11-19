@@ -70,6 +70,7 @@ void nsnotify(int nsport, int clport, int stport)
   pthread_create_tx(&storage, NULL, stlisten, &stport);
 
   fprintf_t(stdout, "Started the listener threads.\n");
+  
   pthread_join(server, NULL);
   pthread_join(client, NULL);
   pthread_join(storage, NULL);

@@ -16,3 +16,5 @@ typedef struct __list {
 void init_list(list_t* L);
 void insert(list_t *L, storage_t st);
 void delete(list_t *L, snode_t *x);
+int get_number(list_t* L);
+int search(list_t* L, storage_t* st);

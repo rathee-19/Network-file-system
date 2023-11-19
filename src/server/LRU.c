@@ -29,9 +29,14 @@ storage_t* cache_retrieve(cache_t* cache, char* path) {
 
     for(int i=0;i<NUM_CACHED;i++) {
         if(strcmp(cache->paths[i], path)==0) {
+            if(search(&storage, cache->storage_servers[i])==0) {
+                break;
+            }
+
             found=1;
 
             int current_position=i;
+            
             while(current_position==(cache->available-1+NUM_CACHED)%NUM_CACHED) {
                 char* selected=cache->paths[current_position];
                 cache->paths[current_position]=cache->paths[(current_position+1)%NUM_CACHED];
