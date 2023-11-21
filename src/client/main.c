@@ -1,27 +1,40 @@
 #include "defs.h"
 
 int sock;
+logfile_t* logfile;
 
-int main(void)
+int main(int argc, char *argv[])
 {
-  sock = socket_tx(AF_INET, SOCK_STREAM, 0);
+#ifdef LOG
+  if (argc < 2) {
+    fprintf(stderr, "usage: %s <logfile>\n", argv[0]);
+    exit(1);
+  }
+  logfile = (logfile_t*) calloc(1, sizeof(logfile_t));
+  strcpy(logfile->path, argv[1]);
+  pthread_mutex_init(&(logfile->lock), NULL);
 
-  struct sockaddr_in addr;
-  memset(&addr, '\0', sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_port = NSPORT;
-  addr.sin_addr.s_addr = inet_addr_tx(NSIP);
+#else
+  logfile = NULL;
 
-  printf("Waiting for the naming server.\n");
-  connect_t(sock, (struct sockaddr*) &addr, sizeof(addr));
-  printf("Connected to the server.\n");
-
-  char op;
+#endif
 
   while (1)
   {
-    printf("\n==> [R]ead [W]rite [C]reate [D]elete [I]nfo [L]ist [P]hotocopy [Q]uit\n");
+    sock = socket_tx(AF_INET, SOCK_STREAM, 0);
+
+    struct sockaddr_in addr;
+    memset(&addr, '\0', sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(NSPORT);
+    addr.sin_addr.s_addr = inet_addr_tx(NSIP);
+
+    connect_t(sock, (struct sockaddr*) &addr, sizeof(addr));
+
+    printf("\n==> [R]ead [W]rite [P]hoto-Copy [C]reate [D]elete [I]nfo [L]ist [Q]uit\n");
     printf("==> Operation to request: ");
+
+    char op;
     scanf(" %c", &op);
     op = toupper(op);
     
@@ -31,6 +44,8 @@ int main(void)
         request_read(); break;
       case 'W':
         request_write(); break;
+      case 'P':
+        request_copy(); break;
       case 'C':
         request_create(); break;
       case 'D':
@@ -39,19 +54,20 @@ int main(void)
         request_info(); break;
       case 'L':
         request_list(); break;
-      case 'P':
-        request_copy(); break;
       case 'Q':
-        goto ret_main;
+        request_invalid(); goto ret_main;
       default:
-        printf("Invalid message\n");
-        continue;
+        request_invalid(); fprintf(stderr, "Invalid request\n");
     }
+
+    close_tx(sock);
   }
 
 ret_main:
+  printf("\n");
   close_tx(sock);
-  printf("\nDisconnected from the server.\n");
+  pthread_mutex_destroy(&(logfile->lock));
+  free(logfile);
   return 0;
 }
 
@@ -66,6 +82,10 @@ void request_read(void)
   scanf(" %[^\n]s", path);
   strcpy(msg.data, path);
 
+  char localpath[PATH_MAX];
+  printf("==> Local Path: ");
+  scanf(" %[^\n]s", localpath);
+
   send_tx(sock, &msg, sizeof(msg), 0);
   recv_tx(sock, &msg, sizeof(msg), 0);
 
@@ -77,11 +97,16 @@ void request_read(void)
     case READ + 1:
       strncpy(ip, msg.data, INET_ADDRSTRLEN);
       port = atoi(msg.data + 32);
+      logc(logfile, PROGRESS, "Sending request to storage server %s:%d\n", ip, port);
       goto connect_read;
     case NOTFOUND:
-      fprintf(stderr, "%s was not found.\n", path); return;
+      logc(logfile, FAILURE, "%s was not found\n", path); return;
+    case UNAVAILABLE:
+      logc(logfile, FAILURE, "%s is unavailable currently\n", path); return;
+    case XLOCK:
+      logc(logfile, FAILURE, "%s is being written to by a client\n", path); return;
     case PERM:
-      fprintf(stderr, "Missing permissions for delete.\n"); return;             // ????????????????????
+      logc(logfile, FAILURE, "Missing permissions for read\n"); return;
     default:
       invalid_response(msg.type); return;
   }
@@ -92,7 +117,7 @@ connect_read:
   struct sockaddr_in addr;
   memset(&addr, '\0', sizeof(addr));
   addr.sin_family = AF_INET;
-  addr.sin_port = port;
+  addr.sin_port = htons(port);
   addr.sin_addr.s_addr = inet_addr_tx(ip);
 
   connect_t(ss_sock, (struct sockaddr*) &addr, sizeof(addr));
@@ -100,9 +125,6 @@ connect_read:
   msg.type = READ;
   strcpy(msg.data, path);
   send_tx(ss_sock, &msg, sizeof(msg), 0);
-#ifdef DEBUG
-  fprintf_t(stdout, "Request sent to the storage server %s/%d\n", ip, port);
-#endif
   recv_tx(ss_sock, &msg, sizeof(msg), 0);
 
   int bytes;
@@ -111,43 +133,38 @@ connect_read:
   switch(msg.type)
   {
     case READ + 1:
-      bytes = atoi(msg.data + 32);
+      bytes = atoi(msg.data);
+      logc(logfile, PROGRESS, "Receiving %d bytes from storage server %s:%d\n", bytes, ip, port);
       goto recv_read;
     case NOTFOUND:
-      fprintf(stderr, "%s was not found.\n", path); return;      
-                                                              // TODO: inform the naming server of the storage's mischief ??
+      logc(logfile, FAILURE, "%s was not found\n", path); return;
     case PERM:
-      fprintf(stderr, "Missing permissions for delete.\n"); return;
+      logc(logfile, FAILURE, "Missing permissions for read\n"); return;
     default:
       invalid_response(msg.type); return;
   }
 
 recv_read:
-  file = fopen_tx(path, "w+");                            // TODO: make sure that the storage server does not panic
-                                                          //       because the poor client couldn't create a damn file
-#ifdef DEBUG
-  fprintf_t(stdout, "Receiving %d bytes from storage server %s/%d\n", bytes, ip, port);
-#endif
+  file = fopen_tx(localpath, "w+");
+  int left = bytes;
 
   while (1)
   {
-    recv_tx(sock, &msg, sizeof(msg), 0);
+    recv_tx(ss_sock, &msg, sizeof(msg), 0);
     switch (msg.type)
     {
       case STOP:
         goto ret_read;
 
       case READ + 1:
-        if (bytes > BUFSIZE)
-        {
+        if (left > BUFSIZE) {
           fwrite_tx(msg.data, sizeof(char), BUFSIZE, file);
-          bytes -= BUFSIZE;
+          left -= BUFSIZE;
           continue;
         }
-        else if (bytes > 0)
-        {
-          fwrite_tx(msg.data, sizeof(char), bytes, file);
-          bytes = 0;
+        else if (left > 0) {
+          fwrite_tx(msg.data, sizeof(char), left, file);
+          left = 0;
           continue;
         }
 
@@ -157,6 +174,7 @@ recv_read:
   }
 
 ret_read:
+  logc(logfile, COMPLETION, "Received %d bytes from storage server %s:%d\n", bytes, ip, port);
   fclose_tx(file);
   close_tx(ss_sock);
 }
@@ -187,14 +205,20 @@ void request_write(void)
     case WRITE + 1:
       strncpy(ip, msg.data, INET_ADDRSTRLEN);
       port = atoi(msg.data + 32);
+      logc(logfile, PROGRESS, "Sending request to storage server %s:%d\n", ip, port);
       goto connect_write;
     case NOTFOUND:
-      fprintf(stderr, "%s was not found.\n", path); return;
+      logc(logfile, FAILURE, "%s was not found\n", path); return;
+    case UNAVAILABLE:
+      logc(logfile, FAILURE, "%s is unavailable currently\n", path); return;
+    case BEING_READ:
+      logc(logfile, FAILURE, "%s is being read currently\n", path); return;
     case RDONLY:
+      logc(logfile, FAILURE, "%s has been marked read-only\n", path); return;
     case XLOCK:
-      fprintf(stderr, "%s has been marked read-only.\n", path); break;
+      logc(logfile, FAILURE, "%s is being written to by a client\n", path); return;
     case PERM:
-      fprintf(stderr, "Missing permissions for delete.\n"); return;
+      logc(logfile, FAILURE, "Missing permissions for write\n"); return;
     default:
       invalid_response(msg.type); return;
   }
@@ -205,7 +229,7 @@ connect_write:
   struct sockaddr_in addr;
   memset(&addr, '\0', sizeof(addr));
   addr.sin_family = AF_INET;
-  addr.sin_port = port;
+  addr.sin_port = htons(port);
   addr.sin_addr.s_addr = inet_addr_tx(ip);
 
   connect_t(ss_sock, (struct sockaddr*) &addr, sizeof(addr));
@@ -213,9 +237,6 @@ connect_write:
   msg.type = WRITE;
   strcpy(msg.data, path);
   send_tx(ss_sock, &msg, sizeof(msg), 0);
-#ifdef DEBUG
-  fprintf_t(stdout, "Request sent to the storage server %s/%d\n", ip, port);
-#endif
   recv_tx(ss_sock, &msg, sizeof(msg), 0);
 
   int bytes;
@@ -225,71 +246,48 @@ connect_write:
   switch(msg.type)
   {
     case WRITE + 1:
-      goto recv_write;
+      goto send_write;
     case NOTFOUND:
-      fprintf(stderr, "%s was not found.\n", path); return;      
-                                                              // TODO: inform the naming server of the storage's mischief ??
+      logc(logfile, FAILURE, "%s was not found\n", path); return;
     case RDONLY:
+      logc(logfile, FAILURE, "%s has been marked read-only\n", path); return;
     case XLOCK:
-      fprintf(stderr, "%s has been marked read-only.\n", path); return;
+      logc(logfile, FAILURE, "%s is being written to by a client\n", path); return;
     case PERM:
-      fprintf(stderr, "Missing permissions for delete.\n"); return;
+      logc(logfile, FAILURE, "Missing permissions for write\n"); return;
     default:
       invalid_response(msg.type); return;
   }
 
-recv_write:
-  file = fopen_tx(localpath, "r");                            // TODO: make sure that the storage server does not panic
-                                                         //       because the poor client couldn't create a damn file
+send_write:
+  file = fopen_tx(localpath, "r");
   stat(localpath, &st);
   bytes = st.st_size;
-
-#ifdef DEBUG
-  fprintf_t(stdout, "Sending %d bytes from storage server %s/%d\n", bytes, ip, port);
-#endif
+  logc(logfile, PROGRESS, "Sending %d bytes to storage server %s:%d\n", bytes, ip, port);
 
   msg.type = WRITE;
   sprintf(msg.data, "%d", bytes);
-  send_tx(sock, &msg, sizeof(msg), 0);
+  send_tx(ss_sock, &msg, sizeof(msg), 0);
 
-  int ret, sent = 0;
-  while (sent < bytes)
-  {
-    if (bytes - sent >= BUFSIZE)
-    {
+  int sent = 0;
+  while (sent < bytes) {
+    if (bytes - sent >= BUFSIZE) {
       fread_tx(msg.data, sizeof(char), BUFSIZE, file);
-      ret = send_tx(sock, &msg, sizeof(msg), 0);
-      sent += ret;
+      send_tx(ss_sock, &msg, sizeof(msg), 0);
+      sent += BUFSIZE;
     }
-    else
-    {
+    else {
       bzero(msg.data, BUFSIZE);
       fread_tx(msg.data, sizeof(char), bytes - sent, file);
-      ret = send_tx(sock, &msg, sizeof(msg), 0);
-      sent += ret;
+      send_tx(ss_sock, &msg, sizeof(msg), 0);
+      sent = bytes;
     }
   }
 
   msg.type = STOP;
-  send_tx(sock, &msg, sizeof(msg), 0);
+  send_tx(ss_sock, &msg, sizeof(msg), 0);
 
-  switch (msg.type)
-  {
-    case WRITE + 1:
-      goto ret_write;
-    case NOTFOUND:
-      fprintf(stderr, "%s was not found.\n", path); return;      
-                                                              // TODO: inform the naming server of the storage's mischief ??
-    case RDONLY:
-    case XLOCK:
-      fprintf(stderr, "%s has been marked read-only.\n", path); return;
-    case PERM:
-      fprintf(stderr, "Missing permissions for delete.\n"); return;
-    default:
-      invalid_response(msg.type); return;
-  }
-
-ret_write:
+  logc(logfile, COMPLETION, "Sent %d bytes to storage server %s:%d\n", bytes, ip, port);
   fclose_tx(file);
   close_tx(ss_sock);
 }
@@ -311,7 +309,7 @@ void request_create(void)
     case 'F':
       msg.type = CREATE_FILE; break;
     default:
-      return;
+      fprintf(stderr, "Invalid request\n"); return;
   }
 
   printf("==> Path: ");
@@ -324,11 +322,11 @@ void request_create(void)
   {
     case CREATE_DIR + 1:
     case CREATE_FILE + 1:
-      printf("%s was created.\n", msg.data); break;
+      logc(logfile, COMPLETION, "%s was created\n", msg.data); break;
     case EXISTS:
-      fprintf(stderr, "%s already exists.\n", msg.data); break;
+      logc(logfile, FAILURE, "%s already exists\n", msg.data); break;
     case PERM:
-      fprintf(stderr, "Missing permissions for create.\n"); break;
+      logc(logfile, FAILURE, "Missing permissions for create\n"); break;
     default:
       invalid_response(msg.type);
   }
@@ -351,14 +349,19 @@ void request_delete(void)
   switch (msg.type)
   {
     case DELETE + 1:
-      printf("%s was deleted.\n", path); break;
+      logc(logfile, COMPLETION, "%s was deleted\n", path); break;
     case NOTFOUND:
-      fprintf(stderr, "%s was not found.\n", path); break;
+      logc(logfile, FAILURE, "%s was not found\n", path); break;
+    case UNAVAILABLE:
+      logc(logfile, FAILURE, "%s is unavailable currently\n", path); return;
+    case BEING_READ:
+      logc(logfile, FAILURE, "%s is being read currently\n", path); return;
     case RDONLY:
+      logc(logfile, FAILURE, "%s has been marked read-only\n", path); break;
     case XLOCK:
-      fprintf(stderr, "%s has been marked read-only.\n", path); break;
+      logc(logfile, FAILURE, "%s is being written to by a client\n", path); return;
     case PERM:
-      fprintf(stderr, "Missing permissions for delete.\n"); break;
+      logc(logfile, FAILURE, "Missing permissions for delete\n"); break;
     default:
       invalid_response(msg.type);
   }
@@ -379,17 +382,18 @@ void request_info(void)
   recv_tx(sock, &msg, sizeof(msg), 0);
 
   int bytes;
-  metadata_t *info;
+  metadata_t* info;
 
   switch (msg.type)
   {
     case INFO + 1:
       bytes = atoi(msg.data);
+      logc(logfile, PROGRESS, "Receiving %d bytes from naming server\n", bytes);
       goto recv_info;
     case NOTFOUND:
-      fprintf(stderr, "%s was not found.\n", path); return;
+      logc(logfile, FAILURE, "%s was not found\n", path); return;
     case PERM:
-      fprintf(stderr, "Missing permissions for delete.\n"); return;
+      logc(logfile, FAILURE, "Missing permissions for info\n"); return;
     default:
       invalid_response(msg.type); return;
   }
@@ -405,19 +409,18 @@ recv_info:
     switch (msg.type)
     {
       case STOP:
+        logc(logfile, COMPLETION, "Received %d bytes from naming server\n", bytes);
         goto ret_info;
 
       case INFO + 1:
-        if (end >= ptr + sizeof(msg) - sizeof(int32_t))
-        {
+        if (end >= ptr + BUFSIZE) {
           memcpy(ptr, msg.data, BUFSIZE);
-          ptr += sizeof(msg);
+          ptr += BUFSIZE;
           continue;
         }
-        else if (end >= ptr)
-        {
-          memcpy(ptr, msg.data, (void*) end - ptr + 1);
-          ptr = (void*) end + 1;
+        else if (end > ptr) {
+          memcpy(ptr, msg.data, (void*) end - ptr);
+          ptr = end;
           continue;
         }
 
@@ -426,91 +429,147 @@ recv_info:
     }
   }
 
-
 ret_info:
   char perms[11], mtime_str[80];
   get_permissions(perms, info->mode);
   strftime(mtime_str, sizeof(mtime_str), "%b %d %H:%M", localtime(&(info->mtime)));
   printf("%s %zu %s\n", perms, info->size, mtime_str);
+
   free(info);
 }
 
 void request_list(void)
 {
-  // TODO: after setting up the data structure
+  message_t msg;
+  msg.type = LIST;
+
+  send_tx(sock, &msg, sizeof(msg), 0);
+  recv_tx(sock, &msg, sizeof(msg), 0);
+
+  int bytes;
+  metadata_t** info;
+
+  switch (msg.type)
+  {
+    case LIST + 1:
+      bytes = atoi(msg.data);
+      logc(logfile, PROGRESS, "Receiving %d bytes from naming server\n", bytes);
+      goto recv_list;
+    default:
+      invalid_response(msg.type); return;
+  }
+
+recv_list:
+  info = (metadata_t**) malloc(bytes);
+  void* ptr = info;
+  void* end = ptr + bytes;
+
+  while (1)
+  {
+    recv_tx(sock, &msg, sizeof(msg), 0);
+    switch (msg.type)
+    {
+      case STOP:
+        logc(logfile, COMPLETION, "Received %d bytes from naming server\n", bytes);
+        goto ret_list;
+
+      case LIST + 1:
+        if (end >= ptr + BUFSIZE) {
+          memcpy(ptr, msg.data, BUFSIZE);
+          ptr += BUFSIZE;
+          continue;
+        }
+        else if (end > ptr) {
+          memcpy(ptr, msg.data, (void*) end - ptr);
+          ptr = end;
+          continue;
+        }
+
+      default:
+        invalid_response(msg.type); return;
+    }
+  }
+
+ret_list:
+  metadata_t* file = (metadata_t*) info;
+  while (end > (void*) file) {
+    if (S_ISDIR(file->mode))
+      printf(BLUE "%s" RESET "\n", file->path);
+    else
+      printf("%s\n", file->path);
+    file++;
+  }
+  
+  free(info);
 }
 
-void request_copy(void) {
-  message_t srcmsg;
-  srcmsg.type = COPY;
-  bzero(srcmsg.data, BUFSIZE);
+void request_copy(void)
+{
+  message_t msg;
+  msg.type = COPY;
+  bzero(msg.data, BUFSIZE);
 
-  char srcpath[PATH_MAX];
-  printf("==> Source Path: ");
-  scanf(" %[^\n]s", srcpath);
-  strcpy(srcmsg.data, srcpath);
+  char curpath[PATH_MAX];
+  printf("==> Current Path: ");
+  scanf(" %[^\n]s", curpath);
 
-  send_tx(sock, &srcmsg, sizeof(srcmsg), 0);
-  #ifdef DEBUG
-  printf("Sent src path message to naming server\n");
-  #endif
-  recv_tx(sock, &srcmsg, sizeof(srcmsg), 0);
+  char newpath[PATH_MAX];
+  printf("==> New Path: ");
+  scanf(" %[^\n]s", newpath);
 
-  switch(srcmsg.type) {
-    case COPY+1:
+  strcpy(msg.data, curpath);
+  send_tx(sock, &msg, sizeof(msg), 0);
+  recv_tx(sock, &msg, sizeof(msg), 0);
+
+  switch (msg.type)
+  {
+    case COPY + 1:
+      goto send_copy;
     case NOTFOUND:
-      fprintf(stderr, "%s was not found.\n", srcpath); break;
+      logc(logfile, FAILURE, "%s was not found\n", curpath); return;
+    case UNAVAILABLE:
+      logc(logfile, FAILURE, "%s is unavailable currently\n", curpath); return;
+    case XLOCK:
+      logc(logfile, FAILURE, "%s is being written to by a client\n", curpath); return;
+    case PERM:
+      logc(logfile, FAILURE, "Missing permissions for copy\n"); return;
     default:
-      invalid_response(srcmsg.type);
+      invalid_response(msg.type); return;
   }
 
-  message_t destmsg;
-  destmsg.type = READ;
-  bzero(destmsg.data, BUFSIZE);
+send_copy:
+  strcpy(msg.data, newpath);
+  send_tx(sock, &msg, sizeof(msg), 0);
+  recv_tx(sock, &msg, sizeof(msg), 0);
 
-  char destpath[PATH_MAX];
-  printf("==> Destnation Path: ");
-  scanf(" %[^\n]s", destpath);
-  strcpy(destmsg.data, destpath);
-
-  send_tx(sock, &destmsg, sizeof(destmsg), 0);
-  #ifdef DEBUG
-  printf("Sent dest path message to naming server\n");
-  #endif
-  recv_tx(sock, &destmsg, sizeof(destmsg), 0);
-
-  switch(destmsg.type) {
-    case COPY+1:
-      break;
+  switch (msg.type)
+  {
+    case COPY + 1:
+      goto send_copy;
+      logc(logfile, COMPLETION, "%s was copied to %s\n", curpath, newpath); break;
     case NOTFOUND:
-      fprintf(stderr, "%s was not found.\n", destpath); break;
+      logc(logfile, FAILURE, "%s was not found\n", curpath); return;
+    case UNAVAILABLE:
+      logc(logfile, FAILURE, "%s is unavailable currently\n", curpath); return;
+    case XLOCK:
+      logc(logfile, FAILURE, "%s is being written to by a client\n", curpath); return;
+    case PERM:
+      logc(logfile, FAILURE, "Missing permissions for copy\n"); return;
     default:
-      invalid_response(destmsg.type);
+      invalid_response(msg.type); return;
   }
+}
 
-  message_t flagmsg;
-  flagmsg.type = READ;
-  bzero(flagmsg.data, BUFSIZE);
+void request_invalid(void)
+{
+  message_t msg;
+  msg.type = INVALID;
 
-  char flag[BUFSIZE];
-  snprintf(flag, "%s", "COPY_COND");
-
-  send_tx(sock, &flagmsg, sizeof(flagmsg), 0);
-  #ifdef DEBUG
-  printf("Sent flag message to naming server\n");
-  #endif
-  recv_tx(sock, &flagmsg, sizeof(flagmsg), 0);
-
-  switch(flagmsg.type) {
-    case COPY+1:
-      break;
-    default:
-      invalid_response(flagmsg.type);
-  }
+  send_tx(sock, &msg, sizeof(msg), 0);
+  recv_tx(sock, &msg, sizeof(msg), 0);
 }
 
 void invalid_response(int resp)
 {
-  // TODO: track all possible executions arriving here
-  fprintf(stderr, "Received an invalid response from the server.\n");
+  logc(logfile, FAILURE, "Received an invalid response %d from the server\n", resp);
 }

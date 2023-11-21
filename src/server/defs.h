@@ -10,50 +10,37 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 #include "../common/api.h"
-#include "../common/list.h"
 #include "../common/utilities.h"
+#include "list.h"
+#include "trie.h"
+#include "cache.h"
 
-#include <strings.h>
+#define PING_TIMEOUT 2        // ... seconds
+#define PING_SLEEP 60         // ... seconds
+#define PING_TOLERANCE 3      // number of consecutives ping misses to be tolerated
+#define CRAWL_SLEEP 15        // ... seconds
 
-typedef struct __request {
-  int sock;
-  struct sockaddr_in addr;
-  socklen_t addr_size;
-  message_t msg;
-} request_t;
-
-typedef struct __cache {
-  char* paths[NUM_CACHED];
-  storage_t* storage_servers[NUM_CACHED];
-  int latest;
-  int available;
-} cache_t;
+#define logns(logfile, level, ...) logevent(SERVER, logfile, level, __VA_ARGS__)
 
 // client.c
-void* handle_createdir(void* arg);
-void* handle_createfile(void* arg);
+void* handle_create_dir(void* arg);
+void* handle_create_file(void* arg);
 void* handle_delete(void* arg);
 void* handle_info(void* arg);
 void* handle_invalid(void* arg);
 void* handle_list(void* arg);
-void* handle_copy(void* arg);
 
 // storage.c
 void* stping(void* arg);
+void* filecrawl(void* arg);
 void* handle_join(void* arg);
 void* handle_read(void* arg);
+void* handle_read_completion(void* arg);
 void* handle_write(void* arg);
-
-list_t storage;
-
-// LRU.c
-void init_cache(cache_t* cache);
-void cache_path(cache_t* cache, storage_t* ss, char* path);
-storage_t* cache_retrieve(cache_t* cache, char* path);
-
-cache_t server_cache;
-
-// logs.c
-void log(const char* message);
+void* handle_write_completion(void* arg);
+void* handle_copy(void* arg);
+void request_delete(fnode_t* node);
+void request_delete_worker(fnode_t* node, snode_t* snode);
+void request_replicate(fnode_t* node);
 
 #endif

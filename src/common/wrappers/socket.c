@@ -11,17 +11,39 @@ int socket_tx(int domain, int type, int protocol)
   return sock;
 }
 
-int connect_t(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
+int setsockopt_t(int socket, int level, int option_name, const void *option_value, socklen_t option_len)
+{
+  int ret = setsockopt(socket, level, option_name, option_value, option_len);
+  if (ret < 0)
+    perror_t("setsockopt");
+  return ret;
+}
+
+int connect_t(int sockfd, const struct sockaddr* addr, socklen_t addrlen)
 {
   while (connect(sockfd, addr, addrlen) < 0) {
     perror_t("connect");
-    fprintf_t(stderr, "Retrying after %d seconds...\n", RETRY);
-    sleep(RETRY);
+    fprintf_t(stderr, "Retrying after %d seconds...\n", RETRY_DIFF);
+    sleep(RETRY_DIFF);
   }
   return 0;
 }
 
-void bind_tx(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
+int connect_tb(int sockfd, const struct sockaddr* addr, socklen_t addrlen, int timeout)
+{
+  while ((timeout >= 0) && (connect(sockfd, addr, addrlen) < 0)) {
+    perror_t("connect");
+    fprintf_t(stderr, "Retrying after %d seconds...\n", RETRY_DIFF);
+    sleep(RETRY_DIFF);
+    timeout -= RETRY_DIFF;
+  }
+  if (timeout >= 0)
+    return 0;
+  else
+    return 1;
+}
+
+void bind_tx(int sockfd, const struct sockaddr* addr, socklen_t addrlen)
 {
   int ret = bind(sockfd, addr, addrlen);
   if (ret < 0)

@@ -13,18 +13,37 @@
 #include "../common/utilities.h"
 
 #define IP "127.0.0.1"
-
-// server.c
-void nsnotify(int nsport, int clport, int stport);
-void* nslisten(void* arg);
-metadata_t** dirinfo(char* dir, int* bytes);
-void popdirinfo(char* dir, metadata_t** data, int* idx, int level);
-int countfiles(char* dir);
+#define logst(logfile, level, ...) logevent(STORAGE, logfile, level, __VA_ARGS__)
 
 // client.c
 void* cllisten(void* arg);
+void* handle_read(void* arg);
+void* handle_write(void* arg);
+void* handle_invalid(void* arg);
+
+// server.c
+void nsnotify(int nsport, int clport, int stport, char* paths, int n);
+void* nslisten(void* arg);
+void* handle_backup_send(void* arg);
+void* handle_copy_internal(void* arg);
+void* handle_create_dir(void* arg);
+void* handle_create_file(void* arg);
+void* handle_delete(void* arg);
+void* handle_ping(void* arg);
 
 // storage.c
 void* stlisten(void* arg);
+void* handle_backup_recv(void* arg);
+void* handle_copy_recv(void* arg);
+void* handle_copy_send(void* arg);
+void* handle_update_recv(void* arg);
+void* handle_update_send(void* arg);
+
+// util.c
+metadata_t** dirinfo(char* paths, int n, int* bytes);
+void popdirinfo(char* cdir, metadata_t** data, int* idx);
+int countfiles(char* cdir);
+void remove_prefix(char* dest, char* src, char* prefix);
+void add_prefix(char* dest, char* src, char* prefix);
 
 #endif

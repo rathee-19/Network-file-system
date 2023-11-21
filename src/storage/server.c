@@ -1,26 +1,25 @@
 #include "defs.h"
 
-char root_dir[PATH_MAX];
+extern logfile_t* logfile;
 
-void nsnotify(int nsport, int clport, int stport)
+void nsnotify(int nsport, int clport, int stport, char* paths, int n)
 {
   int sock = socket_tx(AF_INET, SOCK_STREAM, 0);
 
   struct sockaddr_in addr;
   memset(&addr, '\0', sizeof(addr));
   addr.sin_family = AF_INET;
-  addr.sin_port = NSPORT;
+  addr.sin_port = htons(NSPORT);
   addr.sin_addr.s_addr = inet_addr_tx(NSIP);
 
   connect_t(sock, (struct sockaddr*) &addr, sizeof(addr));
-  fprintf_t(stdout, "Connected to the naming server.\n");
+  logst(logfile, STATUS, "Connected to the naming server\n");
 
   int bytes = 0;
-  sprintf(root_dir, "%d", nsport);                    // assumption
-  void* paths = (void*) dirinfo(root_dir, &bytes);
+  void* info = (void*) dirinfo(paths, n, &bytes);
 
   message_t msg;
-  msg.type = STORAGE_JOIN;
+  msg.type = JOIN;
   bzero(msg.data, BUFSIZE);
   sprintf(msg.data, "%s", IP);
   sprintf(msg.data + 32, "%d", nsport);
@@ -30,37 +29,31 @@ void nsnotify(int nsport, int clport, int stport)
 
   send_tx(sock, &msg, sizeof(msg), 0);
 
-  int ret, sent = 0;
-  while (sent < bytes)
-  {
-    if (bytes - sent >= BUFSIZE)
-    {
-      memcpy(msg.data, paths + sent, BUFSIZE);
-      ret = send_tx(sock, &msg, sizeof(msg), 0);
-      sent += ret;
+  int sent = 0;
+  while (sent < bytes) {
+    if (bytes - sent >= BUFSIZE) {
+      memcpy(msg.data, info + sent, BUFSIZE);
+      send_tx(sock, &msg, sizeof(msg), 0);
+      sent += BUFSIZE;
     }
-    else
-    {
+    else {
       bzero(msg.data, BUFSIZE);
-      memcpy(msg.data, paths + sent, bytes - sent);
-      ret = send_tx(sock, &msg, sizeof(msg), 0);
-      sent += ret;
+      memcpy(msg.data, info + sent, bytes - sent);
+      send_tx(sock, &msg, sizeof(msg), 0);
+      sent = bytes;
     }
   }
 
   msg.type = STOP;
   send_tx(sock, &msg, sizeof(msg), 0);
-
-#ifdef DEBUG
-  fprintf_t(stdout, "Sent %d bytes to the naming server.\n", bytes);
-#endif
+  logst(logfile, PROGRESS, "Sent %d bytes to the naming server\n", bytes);
 
   recv_tx(sock, &msg, sizeof(msg), 0);
-
-  if (msg.type != STORAGE_JOIN + 1) {
-    fprintf_t(stderr, "Failed to register with the naming server.\n");
+  if (msg.type != JOIN + 1) {
+    logst(logfile, FAILURE, "Failed to register with the naming server\n");
     exit(1);
   }
+  logst(logfile, COMPLETION, "Registered with the naming server\n");
 
   close_tx(sock);
 
@@ -69,7 +62,7 @@ void nsnotify(int nsport, int clport, int stport)
   pthread_create_tx(&client, NULL, cllisten, &clport);
   pthread_create_tx(&storage, NULL, stlisten, &stport);
 
-  fprintf_t(stdout, "Started the listener threads.\n");
+  logst(logfile, STATUS, "Started the listener threads\n");
   
   pthread_join(server, NULL);
   pthread_join(client, NULL);
@@ -85,145 +78,128 @@ void* nslisten(void* arg)
   struct sockaddr_in addr;
   memset(&addr, '\0', sizeof(addr));
   addr.sin_family = AF_INET;
-  addr.sin_port = port;
+  addr.sin_port = htons(port);
   addr.sin_addr.s_addr = inet_addr_tx(IP);
 
   bind_tx(sock, (struct sockaddr*) &addr, sizeof(addr));
-  listen_tx(sock, 2);
-  
-  int client_sock;
-  struct sockaddr_in client_addr;
-  socklen_t addr_size = sizeof(client_addr);
-  message_t buffer;
+  listen_tx(sock, 5);
 
   while (1)
   {
-    client_sock = accept_tx(sock, (struct sockaddr*) &client_addr, &addr_size);
-    recv_tx(client_sock, &buffer, sizeof(buffer), 0);
+    pthread_t worker;
+    request_t* req = (request_t*) calloc(1, sizeof(request_t));
+    req->addr_size = sizeof(req->addr);
 
-    switch (buffer.type)
+    req->sock = accept_tx(sock, (struct sockaddr*) &(req->addr), &(req->addr_size));
+    
+    char ip[INET_ADDRSTRLEN];
+    int port = ntohs(req->addr.sin_port);
+    inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
+    logst(logfile, EVENT, "Accepted connection from %s:%d\n", ip, port);
+
+    recv_tx(req->sock, &(req->msg), sizeof(req->msg), 0);
+    switch (req->msg.type)
     {
+      case BACKUP:
+        pthread_create_tx(&worker, NULL, handle_backup_send, req); break;
+      case COPY_ACROSS:
+        pthread_create_tx(&worker, NULL, handle_copy_send, req); break;
+      case COPY_INTERNAL:
+        pthread_create_tx(&worker, NULL, handle_copy_internal, req); break;
       case CREATE_DIR:
+        pthread_create_tx(&worker, NULL, handle_create_dir, req); break;
       case CREATE_FILE:
+        pthread_create_tx(&worker, NULL, handle_create_file, req); break;
       case DELETE:
-      case COPY:
+        pthread_create_tx(&worker, NULL, handle_delete, req); break;
+      case PING:
+        pthread_create_tx(&worker, NULL, handle_ping, req); break;
+      case UPDATE:
+        pthread_create_tx(&worker, NULL, handle_update_send, req); break;
       default:
+        pthread_create_tx(&worker, NULL, handle_invalid, req);
     }
   }
 
   return NULL;
 }
 
-metadata_t** dirinfo(char* cdir, int* bytes)
+void* handle_copy_internal(void* arg)
 {
-  DIR *dir;
-  while ((dir = opendir(cdir)) == NULL) {
-    if (errno == ENOENT && cdir != NULL) {                              // create dir if does not exist
-      if (mkdir(cdir, 0755) < 0)
-        perror_tx("mkdir");
-    }
-    else
-      perror_tx("opendir");
-  }
-  closedir(dir);
-
-  int idx = 0, num = countfiles(cdir);                 // TODO: try dynamic array with realloc or something
-
-#ifdef DEBUG
-  fprintf_t(stdout, "Found %d files in the root directory.\n", num);
-#endif
-
-  metadata_t** data = (metadata_t**) calloc(num, sizeof(metadata_t));
-  *bytes = num * sizeof(metadata_t);
-  popdirinfo(cdir, data, &idx, 0);
-  
-#ifdef DEBUG
-  fprintf_t(stdout, "Retrieved metadata of all files.\n");
-#endif
-
-  return data;
+  return NULL;
 }
 
-void popdirinfo(char* cdir, metadata_t** data, int* idx, int level)
+void* handle_create_dir(void* arg)
 {
-  DIR *dir = opendir(cdir);
-  if (dir == NULL) {
-    perror_t("opendir");
-    return;
-  }
-  
-  struct dirent *entry = readdir(dir);
-  char pathbuf[PATH_MAX];
-  struct stat statbuf;
+  request_t* req = arg;
+  message_t msg = req->msg;
+  int sock = req->sock;
 
-  while (entry != NULL)
-  {
-    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-      entry = readdir(dir);
-      continue;
-    }
+  // if (create)
+    msg.type = CREATE_DIR + 1;
+  // else
+  //  msg.type = EXISTS, or
+  //  msg.type = PERM
+  send_tx(sock, &msg, sizeof(msg), 0);
 
-    sprintf(pathbuf, "%s/%s", cdir, entry->d_name);
-    if (stat(pathbuf, &statbuf) == -1) {
-      perror_t("stat");
-      entry = readdir(dir);
-      continue;
-    }
-
-    metadata_t *info = (metadata_t*) (data + *idx);
-    strcpy(info->path, pathbuf);                                              // TODO: remove root_dir/ prefix
-    if (level != 0)
-      strcpy(info->parent, cdir);
-    info->mode = statbuf.st_mode;
-    info->size = statbuf.st_size;
-    info->ctime = statbuf.st_ctime;
-    info->mtime = statbuf.st_mtime;
-    (*idx)++;
-
-    if (S_ISDIR(statbuf.st_mode))
-      popdirinfo(pathbuf, data, idx, level + 1);
-
-    entry = readdir(dir);
-  }
-
-  closedir(dir);
+  close_tx(sock);
+  return NULL;
 }
 
-int countfiles(char* cdir)
+void* handle_create_file(void* arg)
 {
-  int ctr = 0;
-  DIR *dir = opendir(cdir);
-  if (dir == NULL) {
-    perror_t("opendir");
-    return 0;
-  }
-  
-  struct dirent *entry = readdir(dir);
-  char pathbuf[PATH_MAX];
-  struct stat statbuf;
+  request_t* req = arg;
+  message_t msg = req->msg;
+  int sock = req->sock;
 
-  while (entry != NULL)
-  {
-    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-      entry = readdir(dir);
-      continue;
-    }
+  // if (create)
+    msg.type = CREATE_FILE + 1;
+  // else
+  //  msg.type = EXISTS, or
+  //  msg.type = PERM
+  send_tx(sock, &msg, sizeof(msg), 0);
 
-    sprintf(pathbuf, "%s/%s", cdir, entry->d_name);
-    if (stat(pathbuf, &statbuf) == -1) {
-      perror_t("stat");
-      entry = readdir(dir);
-      continue;
-    }
+  close_tx(sock);
+  return NULL;
+}
 
-    ctr += 1;
+void* handle_delete(void* arg)
+{
+  request_t* req = arg;
+  message_t msg = req->msg;
+  int sock = req->sock;
 
-    if (S_ISDIR(statbuf.st_mode))
-      ctr += countfiles(pathbuf);
+  // if (del)
+    msg.type = DELETE + 1;
+  // else
+  //  msg.type = NOTFOUND, or
+  //  msg.type = PERM
+  send_tx(sock, &msg, sizeof(msg), 0);
 
-    entry = readdir(dir);
-  }
+  close_tx(sock);
+  return NULL;
+}
 
-  closedir(dir);
-  return ctr;
+void* handle_ping(void* arg)
+{
+  request_t* req = arg;
+  message_t msg = req->msg;
+  int sock = req->sock;
+    
+  char ip[INET_ADDRSTRLEN];
+  int port = ntohs(req->addr.sin_port);
+  inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
+  logst(logfile, EVENT, "Received ping from %s:%d\n", ip, port);
+
+  msg.type = PING + 1;
+  send_tx(sock, &msg, sizeof(msg), 0);
+  logst(logfile, COMPLETION, "Sent ping acknowledgement to %s:%d\n", ip, port);
+
+  close_tx(sock);
+  return NULL;
+}
+
+void* handle_update_send(void* arg)
+{
+  return NULL;
 }

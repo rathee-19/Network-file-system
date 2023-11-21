@@ -12,14 +12,19 @@
 #include <sys/stat.h>
 #include <arpa/inet.h>
 #include "../common/api.h"
+#include "../common/colors.h"
 #include "../common/utilities.h"
+
+#define logc(logfile, level, ...) logevent(CLIENT, logfile, level, __VA_ARGS__)
 
 void request_read(void);
 void request_write(void);
+void request_copy(void);
 void request_create(void);
 void request_delete(void);
 void request_info(void);
 void request_list(void);
+void request_invalid(void);
 void invalid_response(int32_t resp);
 
 #endif

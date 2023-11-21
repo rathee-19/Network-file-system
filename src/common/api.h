@@ -17,21 +17,25 @@
 #define LIST 10
 #define INFO 12
 #define COPY 14
-#define STORAGE_JOIN 16
-#define STOP 18
+#define COPY_INTERNAL 16
+#define COPY_ACROSS 18
+#define BACKUP 20
+#define UPDATE 22
+#define JOIN 24
+#define PING 26
+#define STOP 28
 
 #define INVALID -1
 #define NOTFOUND -2
 #define EXISTS -3
-#define RDONLY -4                // writes disabled on ss failure
-#define XLOCK -5
-#define PERM -6                  // DOUBT: do we need this?
+#define BEING_READ -4
+#define RDONLY -5                // writes disabled on ss failure
+#define XLOCK -6
+#define PERM -7
+#define UNAVAILABLE -8
 
 #define BUFSIZE 4096             // assumption: greater than PATH_MAX, 4096
-#define RETRY 5                  // ... seconds
-
-#define NUM_CACHED 20            // number of location entries to be cached
-#define PATH_MAX 4096            // maximum path length allowed
+#define RETRY_DIFF 1                  // seconds
 
 #define COPY_COND 100            // set to indicate user defined operation
 #define BACKUP_COND 101          // set to indicate naming server defined backup operation
@@ -41,9 +45,15 @@ typedef struct __message {
   char data[BUFSIZE];
 } message_t;
 
+typedef struct __request {
+  int sock;
+  struct sockaddr_in addr;
+  socklen_t addr_size;
+  message_t msg;
+} request_t;
+
 typedef struct __metadata {
   char path[PATH_MAX];
-  char parent[PATH_MAX];
   mode_t mode;
   off_t size;
   __time_t ctime;                // TODO: struct_stat.h may refer to struct timespec instead
@@ -56,5 +66,10 @@ typedef struct __storage {
   int32_t clport;
   int32_t stport;
 } storage_t;
+
+typedef struct __logfile {
+  char path[PATH_MAX];
+  pthread_mutex_t lock;
+} logfile_t;
 
 #endif

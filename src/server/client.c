@@ -1,310 +1,193 @@
 #include "defs.h"
 
-void* handle_createdir(void* arg)
+extern list_t storage;
+extern trie_t files;
+extern cache_t cache;
+extern logfile_t* logfile;
+
+void* handle_create_dir(void* arg)
 {
-  // while (1);
-
-  request_t* req = (request_t*)arg;
-
-  message_t msg=req->msg;
-
-  char* dirpath = msg.data;
-
-  if(dirpath[strlen(dirpath)-1]=='/') {
-    dirpath[strlen(dirpath)-1]='\0';
-  }
-
-  for(int i=strlen(dirpath)-1;i>-1;i--) {
-    if(dirpath[i]=='/') {
-      dirpath[i]='\0';
-    }
-  }
-
-  storage_t* storage_server=NULL;
-
-  if((storage_server = cache_retrieve(&server_cache, dirpath)) == NULL) {
-    //Search for the ss that has the data
-  }
-
-  if(search(&storage, storage_server)==0) {
-    storage_server=NULL;
-  }
-
-  message_t createmsg, ackmsg;
-  createmsg.type=CREATE_DIR;
-  bzero(ackmsg.data, BUFSIZE);
-
-  if(storage_server == NULL) {
-    ackmsg.type = NOTFOUND;
-
-    send_tx(req->sock, &ackmsg, sizeof(ackmsg), 0);
-
-    return NULL;
-  }
-  else {
-    createmsg.type = msg.type+1;
-
-    dirpath[strlen(dirpath)]='/';
-    snprintf(createmsg.data, "%s", dirpath);
-
-    send_tx(storage_server->stport, &createmsg, sizeof(createmsg), 0);
-
-    message_t response;
-
-    recv_tx(storage_server, &response, sizeof(response), 0);
-
-    ackmsg.type=response.type;
-    snprintf(ackmsg.data, "%s", response.data);
-  }
-
-  send_tx(req->sock, &ackmsg, sizeof(ackmsg), 0);
-  
   return NULL;
 }
 
-void* handle_createfile(void* arg)
+void* handle_create_file(void* arg)
 {
-  // while (1);
 
-  request_t* req = (request_t*)arg;
-
-  message_t msg=req->msg;
-
-  char* fiilepath = msg.data;
-
-  if(fiilepath[strlen(fiilepath)-1]=='/') {
-    fiilepath[strlen(fiilepath)-1]='\0';
-  }
-
-  for(int i=strlen(fiilepath)-1;i>-1;i--) {
-    if(fiilepath[i]=='/') {
-      fiilepath[i]='\0';
-    }
-  }
-
-  storage_t* storage_server=NULL;
-
-  if((storage_server = cache_retrieve(&server_cache, fiilepath)) == NULL) {
-    //Search for the ss that has the data
-  }
-
-  if(search(&storage, storage_server)==0) {
-    storage_server=NULL;
-  }
-
-  message_t createmsg, ackmsg;
-  createmsg.type=CREATE_FILE;
-  bzero(ackmsg.data, BUFSIZE);
-
-  if(storage_server == NULL) {
-    ackmsg.type = NOTFOUND;
-
-    send_tx(req->sock, &ackmsg, sizeof(ackmsg), 0);
-
-    return NULL;
-  }
-  else {
-    createmsg.type = msg.type+1;
-
-    fiilepath[strlen(fiilepath)]='/';
-    snprintf(createmsg.data, "%s", fiilepath);
-
-    send_tx(storage_server->stport, &createmsg, sizeof(createmsg), 0);
-
-    message_t response;
-
-    recv_tx(storage_server, &response, sizeof(response), 0);
-
-    ackmsg.type=response.type;
-    snprintf(ackmsg.data, "%s", response.data);
-  }
-
-  send_tx(req->sock, &ackmsg, sizeof(ackmsg), 0);
-  
   return NULL;
 }
 
 void* handle_delete(void* arg)
 {
-  // while (1);
+  request_t* req = arg;
+  message_t msg = req->msg;
+  int sock = req->sock;
 
-  request_t* req = (request_t*)arg;
-
-  message_t msg=req->msg;
-
-  char* fiilepath = msg.data;
-
-  if(fiilepath[strlen(fiilepath)-1]=='/') {
-    fiilepath[strlen(fiilepath)-1]='\0';
+  char ip[INET_ADDRSTRLEN];
+  int port = ntohs(req->addr.sin_port);
+  inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
+  logns(logfile, EVENT, "Received delete request from %s:%d, for %s\n", ip, port, msg.data);
+  
+  fnode_t* node = cache_search(&cache, msg.data);
+  if (node == NULL) {
+    node = trie_search(&files, msg.data);
+    if (node != NULL)
+      cache_insert(&cache, node);
   }
 
-  for(int i=strlen(fiilepath)-1;i>-1;i--) {
-    if(fiilepath[i]=='/') {
-      fiilepath[i]='\0';
-    }
+  if (node == NULL) {
+    msg.type = NOTFOUND;
+    logns(logfile, FAILURE, "Returning info request from %s:%d, for unknown file %s\n", ip, port, msg.data);
   }
-
-  storage_t* storage_server=NULL;
-
-  if((storage_server = cache_retrieve(&server_cache, fiilepath)) == NULL) {
-    //Search for the ss that has the data
-  }
-
-  if(search(&storage, storage_server)==0) {
-    storage_server=NULL;
-  }
-
-  message_t createmsg, ackmsg;
-  createmsg.type=DELETE;
-  bzero(ackmsg.data, BUFSIZE);
-
-  if(storage_server == NULL) {
-    ackmsg.type = NOTFOUND;
-
-    send_tx(req->sock, &ackmsg, sizeof(ackmsg), 0);
-
-    return NULL;
+  else if (S_ISDIR(node->file.mode)) {
+    invalidate_dir(&files, node);
+    msg.type = DELETE + 1;
+    logns(logfile, COMPLETION, "Sending delete confirmation to %s:%d\n", ip, port);
   }
   else {
-    createmsg.type = msg.type+1;
-
-    fiilepath[strlen(fiilepath)]='/';
-    snprintf(createmsg.data, "%s", fiilepath);
-
-    send_tx(storage_server->stport, &createmsg, sizeof(createmsg), 0);
-
-    message_t response;
-
-    recv_tx(storage_server, &response, sizeof(response), 0);
-
-    ackmsg.type=response.type;
-    snprintf(ackmsg.data, "%s", response.data);
+    pthread_mutex_lock(&(node->lock));
+    if (node->rd > 0) {
+      msg.type = BEING_READ;
+      logns(logfile, FAILURE, "Returning write request from %s:%d, due to %s being read\n", ip, port, msg.data);
+    }
+    else if (node->wr > 0) {
+      msg.type = XLOCK;
+      logns(logfile, FAILURE, "Returning write request from %s:%d, due to %s being locked\n", ip, port, msg.data);
+    }
+    else {
+      invalidate_file(&files, node);
+      msg.type = DELETE + 1;
+      logns(logfile, COMPLETION, "Sending delete confirmation to %s:%d\n", ip, port);
+    }
+    pthread_mutex_unlock(&(node->lock));
   }
+  
+  send_tx(sock, &msg, sizeof(msg), 0);
 
-  send_tx(req->sock, &ackmsg, sizeof(ackmsg), 0);
-
+  close_tx(sock);
+  free(req);
   return NULL;
 }
 
 void* handle_info(void* arg)
 {
-  // while (1);
+  request_t* req = arg;
+  message_t msg = req->msg;
+  int sock = req->sock;
 
-  request_t* req = (request_t*)arg;
+  char ip[INET_ADDRSTRLEN];
+  int port = ntohs(req->addr.sin_port);
+  inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
+  logns(logfile, EVENT, "Received info request from %s:%d, for %s\n", ip, port, msg.data);
 
-  message_t msg=req->msg;
-
-  char* path = msg.data;
-
-  storage_t* storage_server = NULL;
-
-  if((storage_server = cache_retrieve(&server_cache, path)) == NULL) {
-    //Search for the ss that has the data
+  fnode_t* node = cache_search(&cache, msg.data);
+  if (node == NULL) {
+    node = trie_search(&files, msg.data);
+    if (node != NULL)
+      cache_insert(&cache, node);
   }
 
-  if(search(&storage, storage_server)==0) {
-    storage_server=NULL;
-  }
-
-  message_t ackmsg;
-
-  if(storage_server == NULL) {
-    ackmsg.type = NOTFOUND;
-    bzero(ackmsg.data, BUFSIZE);
+  if (node == 0) {
+    msg.type = NOTFOUND;
+    send_tx(sock, &msg, sizeof(msg), 0);
+    logns(logfile, FAILURE, "Returning info request from %s:%d, for unknown file %s\n", ip, port, msg.data);
   }
   else {
-    ackmsg.type = msg.type+1;
-    snprintf(ackmsg.data, "%d", storage_server->stport);
+    pthread_mutex_lock(&(node->lock));
+    metadata_t info = node->file;
+    pthread_mutex_unlock(&(node->lock));
+    
+    msg.type = INFO + 1;
+    int bytes = sizeof(metadata_t);
+    sprintf(msg.data, "%ld", sizeof(metadata_t));
+    send_tx(sock, &msg, sizeof(msg), 0);
+    logns(logfile, PROGRESS, "Sending %d bytes to %s:%d\n", bytes, ip, port);
+
+    int sent = 0;
+    void* ptr = &info;
+    while (sent < bytes) {
+      if (bytes - sent >= BUFSIZE) {
+        memcpy(msg.data, ptr + sent, BUFSIZE);
+        send_tx(sock, &msg, sizeof(msg), 0);
+        sent += BUFSIZE;
+      }
+      else {
+        bzero(msg.data, BUFSIZE);
+        memcpy(msg.data, ptr + sent, bytes - sent);
+        send_tx(sock, &msg, sizeof(msg), 0);
+        sent = bytes;
+      }
+    }
+
+    msg.type = STOP;
+    send_tx(sock, &msg, sizeof(msg), 0);
+    logns(logfile, COMPLETION, "Sent %d bytes to %s:%d\n", bytes, ip, port);
   }
 
-  send_tx(req->sock, &ackmsg, sizeof(ackmsg), 0);
-
+  close_tx(sock);
+  free(req);
   return NULL;
 }
 
 void* handle_invalid(void* arg)
 {
-  // while (1);
+  request_t* req = arg;
+  message_t msg = req->msg;
+  int sock = req->sock;
 
-  request_t* req=(request_t*)arg;
+  char ip[INET_ADDRSTRLEN];
+  int port = ntohs(req->addr.sin_port);
+  inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
+  logns(logfile, EVENT, "Received invalid request from %s:%d\n", ip, port);
 
-  message_t invalidmsg;
-  invalidmsg.type=INVALID;
+  msg.type = INVALID;
+  send_tx(sock, &msg, sizeof(msg), 0);
 
-  send_tx(req->sock, &invalidmsg, sizeof(invalidmsg), 0);
-
+  close_tx(sock);
+  free(req);
   return NULL;
 }
 
 void* handle_list(void* arg)
 {
-  while (1);
+  request_t* req = arg;
+  message_t msg = req->msg;
+  int sock = req->sock;
 
+  char ip[INET_ADDRSTRLEN];
+  int port = ntohs(req->addr.sin_port);
+  inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
+  logns(logfile, EVENT, "Received list request from %s:%d\n", ip, port);
+
+  int bytes = 0;
+  void* paths = (void*) preorder_traversal(&files, &bytes);
+
+  msg.type = LIST + 1;
+  bzero(msg.data, BUFSIZE);
+  sprintf(msg.data, "%d", bytes);
+  send_tx(sock, &msg, sizeof(msg), 0);
+  logns(logfile, PROGRESS, "Sending %d bytes to %s:%d\n", bytes, ip, port);
+
+  int sent = 0;
+  while (sent < bytes) {
+    if (bytes - sent >= BUFSIZE) {
+      memcpy(msg.data, paths + sent, BUFSIZE);
+      send_tx(sock, &msg, sizeof(msg), 0);
+      sent += BUFSIZE;
+    }
+    else {
+      bzero(msg.data, BUFSIZE);
+      memcpy(msg.data, paths + sent, bytes - sent);
+      send_tx(sock, &msg, sizeof(msg), 0);
+      sent = bytes;
+    }
+  }
+
+  msg.type = STOP;
+  send_tx(sock, &msg, sizeof(msg), 0);
+  logns(logfile, COMPLETION, "Sent %d bytes to %s:%d\n", bytes, ip, port);
+
+  close_tx(sock);
+  free(paths);
+  free(req);
   return NULL;
-}
-
-void* handle_read(void* arg) {
-  request_t* req = (request_t*)arg;
-
-  message_t msg=req->msg;
-
-  char* path = msg.data;
-
-  storage_t* storage_server = NULL;
-
-  if((storage_server = cache_retrieve(&server_cache, path)) == NULL) {
-    //Search for the ss that has the data
-  }
-
-  if(search(&storage, storage_server)==0) {
-    storage_server=NULL;
-  }
-
-  message_t ackmsg;
-
-  if(storage_server == NULL) {
-    ackmsg.type = NOTFOUND;
-    bzero(ackmsg.data, BUFSIZE);
-  }
-  else {
-    ackmsg.type = msg.type+1;
-    snprintf(ackmsg.data, "%d", storage_server->stport);
-  }
-
-  send_tx(req->sock, &ackmsg, sizeof(ackmsg), 0);
-}
-
-void* handle_write(void* arg) {
-  request_t* req = (request_t*)arg;
-
-  message_t msg=req->msg;
-
-  char* path = msg.data;
-
-  storage_t* storage_server = NULL;
-
-  if((storage_server = cache_retrieve(&server_cache, path)) == NULL) {
-    //Search for the ss that has the data
-  }
-
-  if(search(&storage, storage_server)==0) {
-    storage_server=NULL;
-  }
-
-  message_t ackmsg;
-
-  if(storage_server == NULL) {
-    ackmsg.type = NOTFOUND;
-    bzero(ackmsg.data, BUFSIZE);
-  }
-  else {
-    ackmsg.type = msg.type+1;
-    snprintf(ackmsg.data, "%d", storage_server->stport);
-  }
-
-  send_tx(req->sock, &ackmsg, sizeof(ackmsg), 0);
-}
-
-void* handle_copy(void* arg) {
-
 }
