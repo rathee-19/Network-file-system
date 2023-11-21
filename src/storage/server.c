@@ -338,11 +338,8 @@ void* handle_delete(void* arg)
   message_t msg = req->msg;
   int sock = req->sock;
 
-  // if (del)
-    msg.type = DELETE + 1;
-  // else
-  //  msg.type = NOTFOUND, or
-  //  msg.type = PERM
+  remove(msg.data);
+  msg.type = DELETE + 1;
   send_tx(sock, &msg, sizeof(msg), 0);
 
   close_tx(sock);

@@ -1,6 +1,8 @@
 #include "defs.h"
 #include "trie.h"
 
+extern queue_t qdel;
+extern queue_t qrep;
 extern logfile_t* logfile;
 
 fnode_t* trie_node(void)
@@ -56,6 +58,7 @@ enum t_ret trie_insert(trie_t* T, metadata_t* file, snode_t* loc)
   T->num++;
   pthread_mutex_unlock(&T->lock);
   logns(logfile, PROGRESS, "Added: %s\n", temp->file.path);
+  queue_insert(&qrep, temp);
   return T_SUCCESS;
 }
 
@@ -228,6 +231,7 @@ void invalidate_file(trie_t* T, fnode_t *node)
     T->num--;
   }
   pthread_mutex_unlock(&T->lock);
+  queue_insert(&qdel, node);
 }
 
 void invalidate_dir(trie_t* T, fnode_t *node)
@@ -243,6 +247,7 @@ void invalidate_worker(trie_t* T, fnode_t *head)
   if (head->valid) {
     head->valid = 0;
     T->num--;
+    queue_insert(&qdel, head);
   }
   for (int i = 0; i < CHARSET; i++)
     if (head->child[i] != 0)

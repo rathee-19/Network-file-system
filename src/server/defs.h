@@ -13,6 +13,7 @@
 #include "../common/utilities.h"
 #include "list.h"
 #include "trie.h"
+#include "queue.h"
 #include "cache.h"
 
 #define PING_TIMEOUT 2        // ... seconds

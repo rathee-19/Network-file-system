@@ -2,6 +2,8 @@
 
 list_t storage;
 trie_t files;
+queue_t qdel;
+queue_t qrep;
 cache_t cache;
 logfile_t* logfile;
 
@@ -9,6 +11,8 @@ int main(void)
 {
   list_init(&storage);
   trie_init(&files);
+  queue_init(&qdel);
+  queue_init(&qrep);
   cache_init(&cache);
 
 #ifdef LOG

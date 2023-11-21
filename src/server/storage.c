@@ -2,6 +2,8 @@
 
 extern list_t storage;
 extern trie_t files;
+extern queue_t qdel;
+extern queue_t qrep;
 extern cache_t cache;
 extern logfile_t* logfile;
 
@@ -60,15 +62,13 @@ void* filecrawl(void* arg)
 {
   while (1)
   {
-    /*fnode_t* file = NULL;
-    if ((file = check_ghost_files(&files)) != NULL)
+    fnode_t* file = NULL;
+    if ((file = queue_pop(&qdel)) != NULL)
       request_delete(file);
-    else if ((file = check_vulnerable_files(&files)) != NULL)
+    else if ((file = queue_pop(&qrep)) != NULL)
       request_replicate(file);
-    else {
-      trie_prune(&files);*/
+    else
       sleep(CRAWL_SLEEP);
-    //}
   }
 
   return NULL;
@@ -561,7 +561,7 @@ void request_delete_worker(fnode_t* node, snode_t* snode)
 
 void request_replicate(fnode_t* node)
 {
-
+  
 }
 
 snode_t* available_server(fnode_t* node)

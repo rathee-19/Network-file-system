@@ -2,6 +2,8 @@
 
 extern list_t storage;
 extern trie_t files;
+extern queue_t qdel;
+extern queue_t qrep;
 extern cache_t cache;
 extern logfile_t* logfile;
 
