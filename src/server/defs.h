@@ -46,5 +46,6 @@ void* handle_copy(void* arg);
 void request_delete(fnode_t* node);
 void request_delete_worker(fnode_t* node, snode_t* snode);
 void request_replicate(fnode_t* node);
+snode_t* available_server(fnode_t* node);
 
 #endif

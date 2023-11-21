@@ -400,6 +400,111 @@ void* handle_copy(void* arg)
   inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
   logns(logfile, EVENT, "Received copy request from %s:%d, for %s\n", ip, port, msg.data);
 
+  char curpath[PATH_MAX];
+  char newpath[PATH_MAX];
+
+  sprintf(curpath, "%s", msg.data);
+  recv_tx(sock, &msg, sizeof(msg), 0);
+  sprintf(newpath, "%s", msg.data);
+
+  fnode_t* curnode = cache_search(&cache, curpath);
+  if (curnode == NULL) {
+    curnode = trie_search(&files, curpath);
+    if (curnode != NULL)
+      cache_insert(&cache, curnode);
+  }
+
+  if (curnode == NULL) {
+    msg.type = NOTFOUND;
+    logns(logfile, FAILURE, "Returning copy request from %s:%d, for unknown file %s\n", ip, port, curpath);
+    goto respond_copy;
+  }
+
+  char parent[PATH_MAX];
+  get_parent_dir(parent, newpath);
+
+  fnode_t* newnode = cache_search(&cache, parent);
+  if (newnode == NULL) {
+    newnode = trie_search(&files, parent);
+    if (newnode != NULL)
+      cache_insert(&cache, newnode);
+  }
+
+  if (newnode == NULL) {
+    msg.type = NOTFOUND;
+    logns(logfile, FAILURE, "Returning copy request from %s:%d, to unknown parent directory %s\n", ip, port, parent);
+    goto respond_copy;
+  }
+
+  snode_t* sender = available_server(curnode);
+  snode_t* receiver = available_server(newnode);
+
+  if (sender == NULL || receiver == NULL) {
+    msg.type = UNAVAILABLE;
+    goto respond_copy;
+  }
+
+  char ss_ip[INET_ADDRSTRLEN];
+  int ss_port;
+
+  sprintf(ss_ip, "%s", sender->st.ip);
+  ss_port = sender->st.nsport;
+  logns(logfile, PROGRESS, "Redirecting create file request from %s:%d, to %s:%d\n", ip, port, ss_ip, ss_port);
+
+  struct sockaddr_in addr;
+  memset(&addr, '\0', sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(ss_port);
+  addr.sin_addr.s_addr = inet_addr_tx(ss_ip);
+
+  int ss_sock = socket_tx(AF_INET, SOCK_STREAM, 0);
+  connect_t(ss_sock, (struct sockaddr*) &addr, sizeof(addr));
+  
+  if (stequal(sender->st, receiver->st)) {
+    msg.type = COPY_INTERNAL;
+    sprintf(msg.data, "%s", curpath);
+    send_tx(ss_sock, &msg, sizeof(msg), 0);
+    sprintf(msg.data, "%s", newpath);
+    send_tx(ss_sock, &msg, sizeof(msg), 0);
+    logns(logfile, PROGRESS, "Forwared copy request to %s:%d, for %s\n", ss_ip, ss_port, curpath);
+
+    recv_tx(ss_sock, &msg, sizeof(msg), 0);
+    switch(msg.type)
+    {
+      case COPY_INTERNAL + 1:
+        logns(logfile, COMPLETION, "Received copy acknowledgment from %s:%d, for %s\n", ss_ip, ss_port, curpath);
+        msg.type = COPY + 1;
+        break;
+      
+      default:
+    }
+  }
+  else {
+    msg.type = COPY_ACROSS;
+    sprintf(msg.data, "%s", curpath);
+    send_tx(ss_sock, &msg, sizeof(msg), 0);
+    sprintf(msg.data, "%s", newpath);
+    send_tx(ss_sock, &msg, sizeof(msg), 0);
+    sprintf(msg.data, "%s", receiver->st.ip);
+    sprintf(msg.data + 32, "%d", receiver->st.stport);
+    send_tx(ss_sock, &msg, sizeof(msg), 0);
+    logns(logfile, PROGRESS, "Forwarded copy request to %s:%d, for %s\n", ss_ip, ss_port, curpath);
+
+    recv_tx(ss_sock, &msg, sizeof(msg), 0);
+    switch(msg.type)
+    {
+      case COPY_ACROSS + 1:
+        logns(logfile, COMPLETION, "Received copy acknowledgment from %s:%d, for %s\n", ss_ip, ss_port, curpath);
+        msg.type = COPY + 1;
+        break;
+      
+      default:
+    }
+  }
+  close_tx(ss_sock);
+
+respond_copy:
+  send_tx(sock, &msg, sizeof(msg), 0);
   close_tx(sock);
   free(req);
   return NULL;
@@ -457,4 +562,16 @@ void request_delete_worker(fnode_t* node, snode_t* snode)
 void request_replicate(fnode_t* node)
 {
 
+}
+
+snode_t* available_server(fnode_t* node)
+{
+  snode_t* snode = NULL;
+  if (node->loc && node->loc->down == 0)
+    snode = node->loc;
+  else if (node->bkp1 && node->bkp1->down == 0)
+    snode = node->bkp1;
+  else if (node->bkp2 && node->bkp2->down == 0)
+    snode = node->bkp2;
+  return snode;
 }

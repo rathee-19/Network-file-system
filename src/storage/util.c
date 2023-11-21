@@ -7,7 +7,7 @@ metadata_t** dirinfo(char* paths, int n, int* bytes)
   int files = 0;
   for (int i = 0; i < n; i++)
     files += countfiles(paths + (i * PATH_MAX));
-  logst(logfile, PROGRESS, "Found %d files in the root directory.\n", files);
+  logst(logfile, PROGRESS, "Found %d files in the accessible paths.\n", files);
 
   metadata_t** data = (metadata_t**) calloc(files, sizeof(metadata_t));
   *bytes = files * sizeof(metadata_t);

@@ -66,22 +66,17 @@ void* handle_create_dir(void* arg)
   ss_port = snode->st.nsport;
   logns(logfile, PROGRESS, "Redirecting create directory request from %s:%d, to %s:%d\n", ip, port, ss_ip, ss_port);
 
-  printf("1\n");
   struct sockaddr_in addr;
   memset(&addr, '\0', sizeof(addr));
   addr.sin_family = AF_INET;
   addr.sin_port = htons(ss_port);
   addr.sin_addr.s_addr = inet_addr_tx(ss_ip);
-  printf("2\n");
 
   ss_sock = socket_tx(AF_INET, SOCK_STREAM, 0);
   connect_t(ss_sock, (struct sockaddr*) &addr, sizeof(addr));
-  printf("3\n");
   
   send_tx(ss_sock, &msg, sizeof(msg), 0);
-  printf("4\n");
   recv_tx(ss_sock, &msg, sizeof(msg), 0);
-  printf("5\n");
 
   int bytes;
   metadata_t* info;
@@ -90,11 +85,9 @@ void* handle_create_dir(void* arg)
   {
     case CREATE_DIR + 1:
       bytes = atoi(msg.data);
-      printf("6\n");
       logns(logfile, COMPLETION, "Received create directory acknowledgment from %s:%d\n", ss_ip, ss_port);
       break;
     default:
-      printf("7\n");
       goto respond_create_dir;
   }
 
@@ -104,13 +97,11 @@ void* handle_create_dir(void* arg)
 
   while (1)
   {
-    printf("8\n");
     recv_tx(ss_sock, &msg, sizeof(msg), 0);
     switch (msg.type)
     {
       case STOP:
         logns(logfile, COMPLETION, "Received %d bytes of metadata from %s:%d\n", bytes, ss_ip, ss_port);
-        printf("9\n");
         trie_insert(&files, info, snode);
         msg.type = CREATE_DIR + 1;
         goto respond_create_dir;

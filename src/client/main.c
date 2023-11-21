@@ -525,34 +525,14 @@ void request_copy(void)
 
   strcpy(msg.data, curpath);
   send_tx(sock, &msg, sizeof(msg), 0);
-  recv_tx(sock, &msg, sizeof(msg), 0);
-
-  switch (msg.type)
-  {
-    case COPY + 1:
-      goto send_copy;
-    case NOTFOUND:
-      logc(logfile, FAILURE, "%s was not found\n", curpath); return;
-    case UNAVAILABLE:
-      logc(logfile, FAILURE, "%s is unavailable currently\n", curpath); return;
-    case XLOCK:
-      logc(logfile, FAILURE, "%s is being written to by a client\n", curpath); return;
-    case PERM:
-      logc(logfile, FAILURE, "Missing permissions for copy\n"); return;
-    default:
-      invalid_response(msg.type); return;
-  }
-
-send_copy:
   strcpy(msg.data, newpath);
   send_tx(sock, &msg, sizeof(msg), 0);
+  
   recv_tx(sock, &msg, sizeof(msg), 0);
-
   switch (msg.type)
   {
     case COPY + 1:
-      goto send_copy;
-      logc(logfile, COMPLETION, "%s was copied to %s\n", curpath, newpath); break;
+      logc(logfile, COMPLETION, "%s was copied to %s\n", curpath, newpath); return;
     case NOTFOUND:
       logc(logfile, FAILURE, "%s was not found\n", curpath); return;
     case UNAVAILABLE:

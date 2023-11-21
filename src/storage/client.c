@@ -63,7 +63,7 @@ void* handle_read(void* arg)
   char ip[INET_ADDRSTRLEN];
   int port = ntohs(req->addr.sin_port);
   inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
-  fprintf_t(stdout, "Received read request from %s:%d, for %s\n", ip, port, msg.data);
+  logst(logfile, EVENT, "Received read request from %s:%d, for %s\n", ip, port, msg.data);
 
   char orgpath[BUFSIZE];
   strcpy(orgpath, msg.data);
@@ -78,14 +78,14 @@ void* handle_read(void* arg)
   if (stat(path, &st) < 0) {
     msg.type = PERM;
     send_tx(sock, &msg, sizeof(msg), 0);
-    fprintf_t(stderr, "Returning read request from %s:%d, due to lack of permissions\n", ip, port);
+    logst(logfile, FAILURE, "Returning read request from %s:%d, due to lack of permissions\n", ip, port);
   }
   else {
     int bytes = st.st_size;
     msg.type = READ + 1;
     sprintf(msg.data, "%d", bytes);
     send_tx(sock, &msg, sizeof(msg), 0);
-    fprintf_t(stdout, "Sending %d bytes to %s:%d\n", bytes, ip, port);
+    logst(logfile, PROGRESS, "Sending %d bytes to %s:%d\n", bytes, ip, port);
 
     int sent = 0;
     while (sent < bytes) {
@@ -119,7 +119,7 @@ void* handle_read(void* arg)
   msg.type = READ + 1;
   strcpy(msg.data, orgpath);
   send_tx(ns_sock, &msg, sizeof(msg), 0);
-  fprintf_t(stdout, "Sent read confirmation, for %s, to the naming server\n", path);
+  logst(logfile, COMPLETION, "Sent read confirmation, for %s, to naming server\n", path);
   
   close(ns_sock);
   fclose(file);
@@ -138,7 +138,7 @@ void* handle_write(void* arg)
   char ip[INET_ADDRSTRLEN];
   int port = ntohs(req->addr.sin_port);
   inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
-  fprintf_t(stdout, "Received write request from %s:%d, for %s\n", ip, port, msg.data);
+  logst(logfile, EVENT, "Received write request from %s:%d, for %s\n", ip, port, msg.data);
 
   char orgpath[BUFSIZE];
   strcpy(orgpath, msg.data);
@@ -155,7 +155,7 @@ void* handle_write(void* arg)
 
   recv_tx(sock, &msg, sizeof(msg), 0);
   int bytes = atoi(msg.data);
-  fprintf_t(stdout, "Receiving %d bytes from %s:%d\n", bytes, ip, port);
+  logst(logfile, PROGRESS, "Receiving %d bytes from %s:%d\n", bytes, ip, port);
 
   while (1)
   {
@@ -197,7 +197,7 @@ finish_write:
   msg.type = WRITE + 1;
   strcpy(msg.data, orgpath);
   send_tx(ns_sock, &msg, sizeof(msg), 0);
-  fprintf_t(stdout, "Sent write confirmation, for %s, to the naming server\n", path);
+  logst(logfile, COMPLETION, "Sent write confirmation, for %s, to the naming server\n", path);
 
   recv_tx(ns_sock, &msg, sizeof(msg), 0);
   

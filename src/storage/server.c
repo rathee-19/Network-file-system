@@ -135,6 +135,80 @@ void* thread_assignment_ns(void* arg)
 
 void* handle_copy_internal(void* arg)
 {
+  request_t* req = arg;
+  message_t msg = req->msg;
+  int sock = req->sock;
+
+  logst(logfile, EVENT, "Received copy file request from naming server, for %s\n", msg.data);
+
+  char curpath[PATH_MAX];
+  char newpath[PATH_MAX];
+
+  sprintf(curpath, "%s", msg.data);
+  recv_tx(sock, &msg, sizeof(msg), 0);
+  sprintf(newpath, "%s", msg.data);
+
+  struct stat st;
+  if (stat(curpath, &st) < 0) {
+    msg.type = UNAVAILABLE;
+    goto ret_copy_internal;
+  }
+
+  if (S_ISDIR(st.st_mode)) {
+    if ((mkdir(newpath, 0777) < 0) || (stat(newpath, &st) < 0)) {
+      msg.type = UNAVAILABLE;
+      goto ret_copy_internal;
+    }
+    msg.type = COPY_INTERNAL + 1;
+  }
+  else {
+    int src_fd, dst_fd, err, n;
+    char buffer[4096];
+
+    src_fd = open(curpath, O_RDONLY);
+    if (src_fd < 0) {
+      msg.type = UNAVAILABLE;
+      goto ret_copy_internal;
+    }
+
+    dst_fd = open(newpath, O_CREAT | O_WRONLY | S_IRWXU | S_IRWXG | S_IRWXO);
+    if (dst_fd < 0) {
+      msg.type = UNAVAILABLE;
+      goto ret_copy_internal;
+    }
+
+    while (1) {
+      err = read(src_fd, buffer, 4096);
+      if (err == -1) {
+        msg.type = UNAVAILABLE;
+        close(src_fd);
+        close(dst_fd);
+        goto ret_copy_internal;
+      }
+
+      n = err;
+      if (n == 0) {
+        logst(logfile, COMPLETION, "Completed copy file request, for %s\n", curpath);
+        msg.type = COPY_INTERNAL + 1;
+        close(src_fd);
+        close(dst_fd);
+        goto ret_copy_internal;
+      }
+
+      err = write(dst_fd, buffer, n);
+      if (err == -1) {
+        msg.type = UNAVAILABLE;
+        close(src_fd);
+        close(dst_fd);
+        goto ret_copy_internal;
+      }
+    }
+  }
+
+ret_copy_internal:
+  send_tx(sock, &msg, sizeof(msg), 0);
+  close(sock);
+  free(req);
   return NULL;
 }
 
