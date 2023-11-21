@@ -1,0 +1,13 @@
+{
+  "files.associations": {
+    "array": "c",
+    "string": "c",
+    "string_view": "c",
+    "span": "c",
+    "charconv": "c",
+    "mutex": "c",
+    "any": "c",
+    "complex": "c",
+    "cstdlib": "c"
+  }
+}

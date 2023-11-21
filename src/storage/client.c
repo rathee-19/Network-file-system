@@ -15,7 +15,7 @@ void* cllisten(void* arg)
   addr.sin_addr.s_addr = inet_addr_tx(IP);
 
   bind_tx(sock, (struct sockaddr*) &addr, sizeof(addr));
-  listen_tx(sock, 5);
+  listen_tx(sock, 50);
 
   while (1)
   {
@@ -28,18 +28,27 @@ void* cllisten(void* arg)
     char ip[INET_ADDRSTRLEN];
     int port = ntohs(req->addr.sin_port);
     inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
-    fprintf_t(stdout, "Accepted connection from %s:%d\n", ip, port);
+    logst(logfile, EVENT, "Accepted connection from %s:%d\n", ip, port);
+    
+    pthread_create_tx(&worker, NULL, thread_assignment_cl, req);
+  }
 
-    recv_tx(req->sock, &(req->msg), sizeof(req->msg), 0);
-    switch (req->msg.type)
-    {
-      case READ:
-        pthread_create_tx(&worker, NULL, handle_read, req); break;
-      case WRITE:
-        pthread_create_tx(&worker, NULL, handle_write, req); break;
-      default:
-        pthread_create_tx(&worker, NULL, handle_invalid, req);
-    }
+  return NULL;
+}
+
+void* thread_assignment_cl(void* arg)
+{
+  request_t* req = arg;
+  recv_tx(req->sock, &(req->msg), sizeof(req->msg), 0);
+
+  switch (req->msg.type)
+  {
+    case READ:
+      handle_read(req); break;
+    case WRITE:
+      handle_write(req); break;
+    default:
+      handle_invalid(req);
   }
 
   return NULL;
@@ -154,6 +163,7 @@ void* handle_write(void* arg)
     switch (msg.type)
     {
       case STOP:
+        fclose(file);
         goto finish_write;
 
       case WRITE:
@@ -189,9 +199,50 @@ finish_write:
   send_tx(ns_sock, &msg, sizeof(msg), 0);
   fprintf_t(stdout, "Sent write confirmation, for %s, to the naming server\n", path);
 
-  close(ns_sock);
-  fclose(file);
+  recv_tx(ns_sock, &msg, sizeof(msg), 0);
   
+  struct stat st;
+  if (stat(msg.data, &st) < 0) {
+    msg.type = UNAVAILABLE;
+    send_tx(ns_sock, &msg, sizeof(msg), 0);
+    goto ret_write;
+  }
+
+  metadata_t info;
+  strcpy(info.path, msg.data);
+  info.mode = st.st_mode;
+  info.size = st.st_size;
+  info.ctime = st.st_ctime;
+  info.mtime = st.st_mtime;
+
+  msg.type = INFO + 1;
+  bytes = sizeof(metadata_t);
+  sprintf(msg.data, "%ld", sizeof(metadata_t));
+  send_tx(ns_sock, &msg, sizeof(msg), 0);
+  logst(logfile, PROGRESS, "Sending %d bytes of metadata to naming server\n", bytes);
+
+  int sent = 0;
+  void* ptr = &info;
+  while (sent < bytes) {
+    if (bytes - sent >= BUFSIZE) {
+      memcpy(msg.data, ptr + sent, BUFSIZE);
+      send_tx(ns_sock, &msg, sizeof(msg), 0);
+      sent += BUFSIZE;
+    }
+    else {
+      bzero(msg.data, BUFSIZE);
+      memcpy(msg.data, ptr + sent, bytes - sent);
+      send_tx(ns_sock, &msg, sizeof(msg), 0);
+      sent = bytes;
+    }
+  }
+
+  msg.type = STOP;
+  send_tx(ns_sock, &msg, sizeof(msg), 0);
+  logst(logfile, COMPLETION, "Sent %d bytes of metadata to naming server\n", bytes);
+
+ret_write:
+  close(ns_sock);
   close(sock);
   free(req);
   return NULL;

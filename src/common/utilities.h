@@ -14,6 +14,9 @@ enum level {STATUS, EVENT, PROGRESS, COMPLETION, FAILURE};
 void get_permissions(char *perms, mode_t mode);
 void timestamp(FILE* stream);
 void logevent(enum caller c, logfile_t* logpath, enum level lvl, const char* message, ...);
+void get_parent_dir(char* dest, char* src);
+void remove_prefix(char* dest, char* src, char* prefix);
+void add_prefix(char* dest, char* src, char* prefix);
 
 // errno.c
 void perror_t(const char* s);

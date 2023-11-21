@@ -22,6 +22,10 @@
 
 #define logns(logfile, level, ...) logevent(SERVER, logfile, level, __VA_ARGS__)
 
+// main.c
+int main(void);
+void* thread_assignment(void* arg);
+
 // client.c
 void* handle_create_dir(void* arg);
 void* handle_create_file(void* arg);

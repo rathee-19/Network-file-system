@@ -59,6 +59,43 @@ enum t_ret trie_insert(trie_t* T, metadata_t* file, snode_t* loc)
   return T_SUCCESS;
 }
 
+enum t_ret trie_update(trie_t* T, metadata_t* file)
+{
+  int len = strlen(file->path);
+  if (len == 0)
+    return T_INVALID;
+
+  if (file->path[len - 1] == '/') {
+    file->path[len - 1] = 0;
+    len--;
+  }
+
+  pthread_mutex_lock(&T->lock);
+  fnode_t* temp = T->head;
+  for (int i = 0; i < len; i++) {
+    int ch = (unsigned char) file->path[i];
+    if (temp->child[ch] == 0) {
+      temp->child[ch] = trie_node();
+      strcpy(temp->child[ch]->file.path, temp->file.path);
+      temp->child[ch]->file.path[i] = file->path[i];
+      temp->child[ch]->file.path[i + 1] = 0;
+    }
+    temp = temp->child[ch];
+  }
+
+  if (temp->valid == 1) {
+    pthread_mutex_unlock(&T->lock);
+    pthread_mutex_lock(&(temp->lock));
+    temp->file = *file;
+    pthread_mutex_unlock(&(temp->lock));
+    logns(logfile, PROGRESS, "Updated: %s\n", file->path);
+    return T_SUCCESS;
+  }
+  
+  pthread_mutex_unlock(&T->lock);
+  return T_NOTFOUND;
+}
+
 fnode_t* trie_search(trie_t* T, char* path)
 {
   int len = strlen(path);

@@ -15,7 +15,9 @@ int main(int argc, char *argv[])
   pthread_mutex_init(&(logfile->lock), NULL);
 
 #else
-  logfile = NULL;
+  logfile = (logfile_t*) calloc(1, sizeof(logfile_t));
+  logfile->path[0] = 0;
+  pthread_mutex_init(&(logfile->lock), NULL);
 
 #endif
 
@@ -312,8 +314,10 @@ void request_create(void)
       fprintf(stderr, "Invalid request\n"); return;
   }
 
+  char path[PATH_MAX];
   printf("==> Path: ");
-  scanf(" %[^\n]s", msg.data);
+  scanf(" %[^\n]s", path);
+  strcpy(msg.data, path);
 
   send_tx(sock, &msg, sizeof(msg), 0);
   recv_tx(sock, &msg, sizeof(msg), 0);
@@ -322,11 +326,13 @@ void request_create(void)
   {
     case CREATE_DIR + 1:
     case CREATE_FILE + 1:
-      logc(logfile, COMPLETION, "%s was created\n", msg.data); break;
+      logc(logfile, COMPLETION, "%s was created\n", path); break;
     case EXISTS:
-      logc(logfile, FAILURE, "%s already exists\n", msg.data); break;
+      logc(logfile, FAILURE, "%s already exists\n", path); break;
     case PERM:
       logc(logfile, FAILURE, "Missing permissions for create\n"); break;
+    case UNAVAILABLE:
+      logc(logfile, FAILURE, "The server was unavailable.\n"); break;
     default:
       invalid_response(msg.type);
   }

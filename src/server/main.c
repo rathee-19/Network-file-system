@@ -16,7 +16,9 @@ int main(void)
   sprintf(logfile->path, "serverlog");
   pthread_mutex_init(&(logfile->lock), NULL);
 #else
-  logfile = NULL;
+  logfile = (logfile_t*) calloc(1, sizeof(logfile_t));
+  logfile->path[0] = 0;
+  pthread_mutex_init(&(logfile->lock), NULL);
 #endif
 
   pthread_t ping;
@@ -34,7 +36,7 @@ int main(void)
   addr.sin_addr.s_addr = inet_addr_tx(NSIP);
 
   bind_tx(sock, (struct sockaddr*) &addr, sizeof(addr));
-  listen_tx(sock, 5);                                          // TODO: IMP: how much backlog can we tolerate??
+  listen_tx(sock, 50);                                          // TODO: IMP: how much backlog can we tolerate??
 
   while (1)
   {
@@ -49,36 +51,45 @@ int main(void)
     inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
     logns(logfile, EVENT, "Accepted connection from %s:%d\n", ip, port);
 
-    recv_tx(req->sock, &(req->msg), sizeof(req->msg), 0);
-    switch(req->msg.type)
-    {
-      case COPY:
-        pthread_create_tx(&worker, NULL, handle_copy, req); break;
-      case CREATE_DIR:
-        pthread_create_tx(&worker, NULL, handle_create_dir, req); break;
-      case CREATE_FILE:
-        pthread_create_tx(&worker, NULL, handle_create_file, req); break;
-      case DELETE:
-        pthread_create_tx(&worker, NULL, handle_delete, req); break;
-      case INFO:
-        pthread_create_tx(&worker, NULL, handle_info, req); break;
-      case JOIN:
-        pthread_create_tx(&worker, NULL, handle_join, req); break;
-      case LIST:
-        pthread_create_tx(&worker, NULL, handle_list, req); break;
-      case READ:
-        pthread_create_tx(&worker, NULL, handle_read, req); break;
-      case READ + 1:
-        pthread_create_tx(&worker, NULL, handle_read_completion, req); break;
-      case WRITE:
-        pthread_create_tx(&worker, NULL, handle_write, req); break;
-      case WRITE + 1:
-        pthread_create_tx(&worker, NULL, handle_write_completion, req); break;
-      default:
-        pthread_create_tx(&worker, NULL, handle_invalid, req);
-    }
+    pthread_create_tx(&worker, NULL, thread_assignment, req);
   }
 
   close_tx(sock);
   return 0;
+}
+
+void* thread_assignment(void* arg)
+{
+  request_t* req = arg;
+  recv_tx(req->sock, &(req->msg), sizeof(req->msg), 0);
+
+  switch(req->msg.type)
+  {
+    case COPY:
+      handle_copy(req); break;
+    case CREATE_DIR:
+      handle_create_dir(req); break;
+    case CREATE_FILE:
+      handle_create_file(req); break;
+    case DELETE:
+      handle_delete(req); break;
+    case INFO:
+      handle_info(req); break;
+    case JOIN:
+      handle_join(req); break;
+    case LIST:
+      handle_list(req); break;
+    case READ:
+      handle_read(req); break;
+    case READ + 1:
+      handle_read_completion(req); break;
+    case WRITE:
+      handle_write(req); break;
+    case WRITE + 1:
+      handle_write_completion(req); break;
+    default:
+      handle_invalid(req);
+  }
+
+  return NULL;
 }

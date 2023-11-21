@@ -31,6 +31,7 @@ typedef struct __trie {
 fnode_t* trie_node(void);
 void trie_init(trie_t* T);
 enum t_ret trie_insert(trie_t* T, metadata_t* file, snode_t* loc);
+enum t_ret trie_update(trie_t* T, metadata_t *file);
 fnode_t* trie_search(trie_t* T, char* path);
 metadata_t* preorder_traversal(trie_t* T, int* bytes);
 void preorder_worker(fnode_t* head, metadata_t* data, int* idx);

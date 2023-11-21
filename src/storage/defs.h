@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <pthread.h>
+#include <sys/stat.h>
 #include <arpa/inet.h>
 #include "../common/api.h"
 #include "../common/utilities.h"
@@ -17,6 +18,7 @@
 
 // client.c
 void* cllisten(void* arg);
+void* thread_assignment_cl(void* arg);
 void* handle_read(void* arg);
 void* handle_write(void* arg);
 void* handle_invalid(void* arg);
@@ -24,6 +26,7 @@ void* handle_invalid(void* arg);
 // server.c
 void nsnotify(int nsport, int clport, int stport, char* paths, int n);
 void* nslisten(void* arg);
+void* thread_assignment_ns(void* arg);
 void* handle_backup_send(void* arg);
 void* handle_copy_internal(void* arg);
 void* handle_create_dir(void* arg);
@@ -33,6 +36,7 @@ void* handle_ping(void* arg);
 
 // storage.c
 void* stlisten(void* arg);
+void* thread_assignment_st(void* arg);
 void* handle_backup_recv(void* arg);
 void* handle_copy_recv(void* arg);
 void* handle_copy_send(void* arg);
@@ -43,7 +47,5 @@ void* handle_update_send(void* arg);
 metadata_t** dirinfo(char* paths, int n, int* bytes);
 void popdirinfo(char* cdir, metadata_t** data, int* idx);
 int countfiles(char* cdir);
-void remove_prefix(char* dest, char* src, char* prefix);
-void add_prefix(char* dest, char* src, char* prefix);
 
 #endif

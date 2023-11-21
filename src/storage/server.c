@@ -82,7 +82,7 @@ void* nslisten(void* arg)
   addr.sin_addr.s_addr = inet_addr_tx(IP);
 
   bind_tx(sock, (struct sockaddr*) &addr, sizeof(addr));
-  listen_tx(sock, 5);
+  listen_tx(sock, 50);
 
   while (1)
   {
@@ -97,28 +97,37 @@ void* nslisten(void* arg)
     inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
     logst(logfile, EVENT, "Accepted connection from %s:%d\n", ip, port);
 
-    recv_tx(req->sock, &(req->msg), sizeof(req->msg), 0);
-    switch (req->msg.type)
-    {
-      case BACKUP:
-        pthread_create_tx(&worker, NULL, handle_backup_send, req); break;
-      case COPY_ACROSS:
-        pthread_create_tx(&worker, NULL, handle_copy_send, req); break;
-      case COPY_INTERNAL:
-        pthread_create_tx(&worker, NULL, handle_copy_internal, req); break;
-      case CREATE_DIR:
-        pthread_create_tx(&worker, NULL, handle_create_dir, req); break;
-      case CREATE_FILE:
-        pthread_create_tx(&worker, NULL, handle_create_file, req); break;
-      case DELETE:
-        pthread_create_tx(&worker, NULL, handle_delete, req); break;
-      case PING:
-        pthread_create_tx(&worker, NULL, handle_ping, req); break;
-      case UPDATE:
-        pthread_create_tx(&worker, NULL, handle_update_send, req); break;
-      default:
-        pthread_create_tx(&worker, NULL, handle_invalid, req);
-    }
+    pthread_create_tx(&worker, NULL, thread_assignment_ns, req);
+  }
+
+  return NULL;
+}
+
+void* thread_assignment_ns(void* arg)
+{
+  request_t* req = arg;
+  recv_tx(req->sock, &(req->msg), sizeof(req->msg), 0);
+
+  switch (req->msg.type)
+  {
+    case BACKUP:
+      handle_backup_send(req); break;
+    case COPY_ACROSS:
+      handle_copy_send(req); break;
+    case COPY_INTERNAL:
+      handle_copy_internal(req); break;
+    case CREATE_DIR:
+      handle_create_dir(req); break;
+    case CREATE_FILE:
+      handle_create_file(req); break;
+    case DELETE:
+      handle_delete(req); break;
+    case PING:
+      handle_ping(req); break;
+    case UPDATE:
+      handle_update_send(req); break;
+    default:
+      handle_invalid(req);
   }
 
   return NULL;
@@ -135,13 +144,53 @@ void* handle_create_dir(void* arg)
   message_t msg = req->msg;
   int sock = req->sock;
 
-  // if (create)
-    msg.type = CREATE_DIR + 1;
-  // else
-  //  msg.type = EXISTS, or
-  //  msg.type = PERM
-  send_tx(sock, &msg, sizeof(msg), 0);
+  logst(logfile, EVENT, "Received create directory request from naming server, for %s\n", msg.data);
 
+  struct stat st;
+  if (stat(msg.data, &st) < 0) {
+    if ((mkdir(msg.data, 0777) < 0) || (stat(msg.data, &st) < 0)) {
+      msg.type = UNAVAILABLE;
+      send_tx(sock, &msg, sizeof(msg), 0);
+      goto ret_create_dir;
+    }
+  }
+
+  logst(logfile, COMPLETION, "Created directory %s\n", msg.data);
+
+  metadata_t info;
+  strcpy(info.path, msg.data);
+  info.mode = st.st_mode;
+  info.size = st.st_size;
+  info.ctime = st.st_ctime;
+  info.mtime = st.st_mtime;
+
+  msg.type = CREATE_DIR + 1;
+  int bytes = sizeof(metadata_t);
+  sprintf(msg.data, "%ld", sizeof(metadata_t));
+  send_tx(sock, &msg, sizeof(msg), 0);
+  logst(logfile, PROGRESS, "Sending %d bytes of metadata to naming server\n", bytes);
+
+  int sent = 0;
+  void* ptr = &info;
+  while (sent < bytes) {
+    if (bytes - sent >= BUFSIZE) {
+      memcpy(msg.data, ptr + sent, BUFSIZE);
+      send_tx(sock, &msg, sizeof(msg), 0);
+      sent += BUFSIZE;
+    }
+    else {
+      bzero(msg.data, BUFSIZE);
+      memcpy(msg.data, ptr + sent, bytes - sent);
+      send_tx(sock, &msg, sizeof(msg), 0);
+      sent = bytes;
+    }
+  }
+
+  msg.type = STOP;
+  send_tx(sock, &msg, sizeof(msg), 0);
+  logst(logfile, COMPLETION, "Sent %d bytes of metadata to naming server\n", bytes);
+
+ret_create_dir:
   close_tx(sock);
   return NULL;
 }
@@ -152,13 +201,59 @@ void* handle_create_file(void* arg)
   message_t msg = req->msg;
   int sock = req->sock;
 
-  // if (create)
-    msg.type = CREATE_FILE + 1;
-  // else
-  //  msg.type = EXISTS, or
-  //  msg.type = PERM
-  send_tx(sock, &msg, sizeof(msg), 0);
+  logst(logfile, EVENT, "Received create file request from naming server, for %s\n", msg.data);
+  
+  FILE* file = fopen(msg.data, "w");
+  if (file == NULL) {
+    msg.type = UNAVAILABLE;
+    send_tx(sock, &msg, sizeof(msg), 0);
+    goto ret_create_file;
+  }
+  
+  struct stat st;
+  if (stat(msg.data, &st) < 0) {
+    msg.type = UNAVAILABLE;
+    send_tx(sock, &msg, sizeof(msg), 0);
+    goto ret_create_file;
+  }
 
+  fclose(file);
+  logst(logfile, COMPLETION, "Created file %s\n", msg.data);
+
+  metadata_t info;
+  strcpy(info.path, msg.data);
+  info.mode = st.st_mode;
+  info.size = st.st_size;
+  info.ctime = st.st_ctime;
+  info.mtime = st.st_mtime;
+
+  msg.type = CREATE_FILE + 1;
+  int bytes = sizeof(metadata_t);
+  sprintf(msg.data, "%ld", sizeof(metadata_t));
+  send_tx(sock, &msg, sizeof(msg), 0);
+  logst(logfile, PROGRESS, "Sending %d bytes to naming server\n", bytes);
+
+  int sent = 0;
+  void* ptr = &info;
+  while (sent < bytes) {
+    if (bytes - sent >= BUFSIZE) {
+      memcpy(msg.data, ptr + sent, BUFSIZE);
+      send_tx(sock, &msg, sizeof(msg), 0);
+      sent += BUFSIZE;
+    }
+    else {
+      bzero(msg.data, BUFSIZE);
+      memcpy(msg.data, ptr + sent, bytes - sent);
+      send_tx(sock, &msg, sizeof(msg), 0);
+      sent = bytes;
+    }
+  }
+
+  msg.type = STOP;
+  send_tx(sock, &msg, sizeof(msg), 0);
+  logst(logfile, COMPLETION, "Sent %d bytes of metadata to naming server\n", bytes);
+
+ret_create_file:
   close_tx(sock);
   return NULL;
 }

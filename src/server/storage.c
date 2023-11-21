@@ -60,22 +60,22 @@ void* filecrawl(void* arg)
 {
   while (1)
   {
-    fnode_t* file = NULL;
+    /*fnode_t* file = NULL;
     if ((file = check_ghost_files(&files)) != NULL)
       request_delete(file);
     else if ((file = check_vulnerable_files(&files)) != NULL)
       request_replicate(file);
     else {
-      trie_prune(&files);
+      trie_prune(&files);*/
       sleep(CRAWL_SLEEP);
-    }
+    //}
   }
 
   return NULL;
 }
 
 void* handle_join(void* arg)
-{
+{ 
   request_t* req = arg;
   message_t buffer = req->msg;
   int sock = req->sock;
@@ -334,6 +334,56 @@ void* handle_write_completion(void* arg)
     pthread_mutex_unlock(&(file->lock));
   }
 
+  int bytes;
+  metadata_t* info;
+
+  msg.type = INFO;
+  send_tx(sock, &msg, sizeof(msg), 0);
+  recv_tx(sock, &msg, sizeof(msg), 0);
+
+  switch(msg.type)
+  {
+    case INFO + 1:
+      bytes = atoi(msg.data);
+      logns(logfile, COMPLETION, "Receiving %d bytes of metadata from %s:%d", bytes, ip, port);
+      break;
+    default:
+      goto ret_write_ack;
+  }
+
+  info = (metadata_t*) malloc(bytes);
+  void* ptr = info;
+  void* end = ptr + bytes;
+
+  while (1)
+  {
+    recv_tx(sock, &msg, sizeof(msg), 0);
+    switch (msg.type)
+    {
+      case STOP:
+        logns(logfile, COMPLETION, "Received %d bytes of metadata from %s:%d\n", bytes, ip, port);
+        trie_update(&files, info);
+        goto ret_write_ack;
+
+      case INFO + 1:
+        if (end >= ptr + BUFSIZE) {
+          memcpy(ptr, msg.data, BUFSIZE);
+          ptr += BUFSIZE;
+          continue;
+        }
+        else if (end > ptr) {
+          memcpy(ptr, msg.data, (void*) end - ptr);
+          ptr = end;
+          continue;
+        }
+
+      default:
+        msg.type = UNAVAILABLE;
+        goto ret_write_ack;
+    }
+  }
+
+ret_write_ack:
   close_tx(sock);
   free(req);
   return NULL;
@@ -342,7 +392,13 @@ void* handle_write_completion(void* arg)
 void* handle_copy(void* arg)
 {
   request_t* req = arg;
+  message_t msg = req->msg;
   int sock = req->sock;
+
+  char ip[INET_ADDRSTRLEN];
+  int port = ntohs(req->addr.sin_port);
+  inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
+  logns(logfile, EVENT, "Received copy request from %s:%d, for %s\n", ip, port, msg.data);
 
   close_tx(sock);
   free(req);

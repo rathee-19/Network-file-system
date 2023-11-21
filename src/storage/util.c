@@ -100,23 +100,3 @@ int countfiles(char* cdir)
   closedir(dir);
   return ctr;
 }
-
-void remove_prefix(char* dest, char* src, char* prefix)
-{
-  *dest = 0;
-  while (*src && *prefix && (*src == *prefix)) {
-    src++;
-    prefix++;
-  }
-  if (*src == '/')
-    src++;
-  strcat(dest, src);
-}
-
-void add_prefix(char* dest, char* src, char* prefix)
-{
-  *dest = 0;
-  strcat(dest, prefix);
-  strcat(dest, "/");
-  strcat(dest, src);
-}

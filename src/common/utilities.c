@@ -71,7 +71,7 @@ void logevent(enum caller c, logfile_t* logfile, enum level lvl, const char* mes
 
 #ifdef LOG
   va_start(args, message);
-  if (logfile != NULL) {
+  if (logfile->path[0] != 0) {
     FILE* outfile = fopen_tx(logfile->path, "a+");
     vfprintf(outfile, message, args);
     fclose(outfile);
@@ -80,4 +80,36 @@ void logevent(enum caller c, logfile_t* logfile, enum level lvl, const char* mes
 
   va_end(args);
   pthread_mutex_unlock(&(logfile->lock));
+}
+
+void get_parent_dir(char* dest, char* src)
+{
+  *dest = 0;
+  strcpy(dest, src);
+
+  for (int i = strlen(dest) - 1; i >= 0; i--)
+    if (dest[i] == '/') {
+      dest[i] = 0;
+      break;
+    }
+}
+
+void remove_prefix(char* dest, char* src, char* prefix)
+{
+  *dest = 0;
+  while (*src && *prefix && (*src == *prefix)) {
+    src++;
+    prefix++;
+  }
+  if (*src == '/')
+    src++;
+  strcat(dest, src);
+}
+
+void add_prefix(char* dest, char* src, char* prefix)
+{
+  *dest = 0;
+  strcat(dest, prefix);
+  strcat(dest, "/");
+  strcat(dest, src);
 }

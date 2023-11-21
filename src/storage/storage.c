@@ -15,7 +15,7 @@ void* stlisten(void* arg)
   addr.sin_addr.s_addr = inet_addr_tx(IP);
 
   bind_tx(sock, (struct sockaddr*) &addr, sizeof(addr));
-  listen_tx(sock, 5);
+  listen_tx(sock, 50);
 
   while (1)
   {
@@ -28,20 +28,29 @@ void* stlisten(void* arg)
     char ip[INET_ADDRSTRLEN];
     int port = ntohs(req->addr.sin_port);
     inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
-    fprintf_t(stdout, "Accepted connection from %s:%d\n", ip, port);
+    logst(logfile, EVENT, "Accepted connection from %s:%d\n", ip, port);
 
-    recv_tx(req->sock, &(req->msg), sizeof(req->msg), 0);
-    switch (req->msg.type)
-    {
-      case BACKUP:
-        pthread_create_tx(&worker, NULL, handle_backup_recv, req); break;
-      case COPY_ACROSS:
-        pthread_create_tx(&worker, NULL, handle_copy_recv, req); break;
-      case UPDATE:
-        pthread_create_tx(&worker, NULL, handle_update_recv, req); break;
-      default:
-        pthread_create_tx(&worker, NULL, handle_invalid, req);
-    }
+    pthread_create_tx(&worker, NULL, thread_assignment_st, req);
+  }
+
+  return NULL;
+}
+
+void* thread_assignment_st(void* arg)
+{
+  request_t* req = arg;
+  recv_tx(req->sock, &(req->msg), sizeof(req->msg), 0);
+
+  switch (req->msg.type)
+  {
+    case BACKUP:
+      handle_backup_recv(req); break;
+    case COPY_ACROSS:
+      handle_copy_recv(req); break;
+    case UPDATE:
+      handle_update_recv(req); break;
+    default:
+      handle_invalid(req);
   }
 
   return NULL;

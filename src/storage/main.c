@@ -18,7 +18,9 @@ int main(int argc, char *argv[])
     fprintf(stderr, "usage: %s <port>\n", argv[0]);
     exit(1);
   }
-  logfile = NULL;
+  logfile = (logfile_t*) calloc(1, sizeof(logfile_t));
+  logfile->path[0] = 0;
+  pthread_mutex_init(&(logfile->lock), NULL);
 #endif
 
   int nsport = atoi(argv[1]);
