@@ -9,18 +9,21 @@ extern logfile_t* logfile;
 
 void* stping(void* arg)
 {
+  request_t* req = reqalloc();
+
   while (1)
   {
     snode_t* node = storage.head->next;
     while (node != storage.head)
     {
-      int sock = socket_tx(AF_INET, SOCK_STREAM, 0);
+      int sock = socket_tpx(req, AF_INET, SOCK_STREAM, 0);
+      req->sock = sock;
 
       struct sockaddr_in addr;
       memset(&addr, '\0', sizeof(addr));
       addr.sin_family = AF_INET;
       addr.sin_port = htons(node->st.nsport);
-      addr.sin_addr.s_addr = inet_addr_tx(node->st.ip);
+      addr.sin_addr.s_addr = inet_addr_tpx(req, node->st.ip);
 
       if (connect_tb(sock, (struct sockaddr*) &addr, sizeof(addr), PING_TIMEOUT)) {
         (node->down)++;
@@ -31,8 +34,8 @@ void* stping(void* arg)
 
       message_t msg;
       msg.type = PING;
-      send_tx(sock, &msg, sizeof(msg), 0);
-      recv_tx(sock, &msg, sizeof(msg), 0);
+      send_tpx(req, sock, &msg, sizeof(msg), 0);
+      recv_tpx(req, sock, &msg, sizeof(msg), 0);
 
       switch (msg.type)
       {
@@ -40,21 +43,22 @@ void* stping(void* arg)
           if (node->down < PING_TOLERANCE)
             unmark_rdonly(&files, node);
           node->down = 0;
-          logns(logfile, STATUS, "Received ping acknowledgment from storage server %s:%d\n", node->st.ip, node->st.nsport);
+          logns(STATUS, "Received ping acknowledgment from storage server %s:%d", node->st.ip, node->st.nsport);
           break;
 
         default:
-          logns(logfile, STATUS, "Failed to receive a ping acknowledgment from storage server %s:%d\n", node->st.ip, node->st.nsport);
+          logns(STATUS, "Failed to receive a ping acknowledgment from storage server %s:%d", node->st.ip, node->st.nsport);
       }
 
 ping_next:
       node = node->next;
-      close_tx(sock);
+      close_tpx(req, sock);
     }
 
     sleep(PING_SLEEP);
   }
 
+  free(req);
   return NULL;
 }
 
@@ -82,8 +86,8 @@ void* handle_join(void* arg)
 
   char ip[INET_ADDRSTRLEN];
   int port = ntohs(req->addr.sin_port);
-  inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
-  logns(logfile, EVENT, "Received join request from %s:%d\n", ip, port);
+  inet_ntop_tpx(req, AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
+  logns(EVENT, "Received join request from %s:%d", ip, port);
 
   storage_t st;
   strcpy(st.ip, buffer.data);
@@ -93,17 +97,18 @@ void* handle_join(void* arg)
   int bytes = atoi(buffer.data + 128);
 
   metadata_t** data = (metadata_t**) malloc(bytes);
+  req->allocptr = (void*) data;
   void* ptr = data;
   void* end = ptr + bytes;
 
   while (1)
   {
-    recv_tx(sock, &buffer, sizeof(buffer), 0);
+    recv_tpx(req, sock, &buffer, sizeof(buffer), 0);
     
     switch (buffer.type)
     {
       case STOP:
-        logns(logfile, PROGRESS, "Received %d bytes from %s:%d\n", bytes, ip, port);
+        logns(PROGRESS, "Received %d bytes from %s:%d", bytes, ip, port);
         goto process_join;
 
       case JOIN:
@@ -119,9 +124,9 @@ void* handle_join(void* arg)
         }
 
       default:
-        logns(logfile, EVENT, "Received invalid request from %s/%d\n", ip, port);
+        logns(EVENT, "Received invalid request from %s/%d", ip, port);
         buffer.type = INVALID;
-        send_tx(sock, &buffer, sizeof(buffer), 0);
+        send_tpx(req, sock, &buffer, sizeof(buffer), 0);
         goto ret_join;
     }
   }
@@ -134,14 +139,13 @@ process_join:
       trie_insert(&files, file, stnode);
       file++;
     }
-    logns(logfile, COMPLETION, "Storage server %s:%d joined the network\n", ip, port);
+    logns(COMPLETION, "Storage server %s:%d joined the network", ip, port);
   }
   buffer.type = JOIN + 1;
-  send_tx(sock, &buffer, sizeof(buffer), 0);
+  send_tpx(req, sock, &buffer, sizeof(buffer), 0);
 
 ret_join:
-  close_tx(sock);
-  free(req);
+  reqfree(req);
   return NULL;
 }
 
@@ -153,8 +157,8 @@ void* handle_read(void* arg)
 
   char ip[INET_ADDRSTRLEN];
   int port = ntohs(req->addr.sin_port);
-  inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
-  logns(logfile, EVENT, "Received read request from %s:%d, for %s\n", ip, port, msg.data);
+  inet_ntop_tpx(req, AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
+  logns(EVENT, "Received read request from %s:%d, for %s", ip, port, msg.data);
 
   fnode_t* file = cache_search(&cache, msg.data);
   if (file == NULL) {
@@ -165,13 +169,17 @@ void* handle_read(void* arg)
 
   if (file == 0) {
     msg.type = NOTFOUND;
-    logns(logfile, FAILURE, "Returning read request from %s:%d, for unknown file %s\n", ip, port, msg.data);
+    logns(FAILURE, "Returning read request from %s:%d, for unknown file %s", ip, port, msg.data);
+  }
+  else if (S_ISDIR(file->file.mode)) {
+    msg.type = INVALID;
+    logns(FAILURE, "Returning read request from %s:%d, for directory %s", ip, port, msg.data);
   }
   else {
     pthread_mutex_lock(&(file->lock));
     if (file->wr > 0) {
       msg.type = XLOCK;
-      logns(logfile, FAILURE, "Returning read request from %s:%d, due to %s being locked\n", ip, port, msg.data);
+      logns(FAILURE, "Returning read request from %s:%d, due to %s being locked", ip, port, msg.data);
     }
     else if (file->loc && file->loc->down == 0) {
       (file->rd)++;
@@ -179,7 +187,7 @@ void* handle_read(void* arg)
       bzero(msg.data, BUFSIZE);
       sprintf(msg.data, "%s", file->loc->st.ip);
       sprintf(msg.data + 32, "%d", file->loc->st.clport);
-      logns(logfile, COMPLETION, "Redirecting read request from %s:%d, to %s:%d\n", ip, port, file->loc->st.ip, file->loc->st.clport);
+      logns(COMPLETION, "Redirecting read request from %s:%d, to %s:%d", ip, port, file->loc->st.ip, file->loc->st.clport);
     }
     else if (file->bkp1 && file->bkp1->down == 0) {
       (file->rd)++;
@@ -187,7 +195,7 @@ void* handle_read(void* arg)
       bzero(msg.data, BUFSIZE);
       sprintf(msg.data, "%s", file->bkp1->st.ip);
       sprintf(msg.data + 32, "%d", file->bkp1->st.clport); 
-      logns(logfile, COMPLETION, "Redirecting read request from %s:%d, to %s:%d\n", ip, port, file->bkp1->st.ip, file->bkp1->st.clport);
+      logns(COMPLETION, "Redirecting read request from %s:%d, to %s:%d", ip, port, file->bkp1->st.ip, file->bkp1->st.clport);
     }
     else if (file->bkp2 && file->bkp2->down == 0) {
       (file->rd)++;
@@ -195,19 +203,18 @@ void* handle_read(void* arg)
       bzero(msg.data, BUFSIZE);
       sprintf(msg.data, "%s", file->bkp2->st.ip);
       sprintf(msg.data + 32, "%d", file->bkp2->st.clport); 
-      logns(logfile, COMPLETION, "Redirecting read request from %s:%d, to %s:%d\n", ip, port, file->bkp2->st.ip, file->bkp2->st.clport);
+      logns(COMPLETION, "Redirecting read request from %s:%d, to %s:%d", ip, port, file->bkp2->st.ip, file->bkp2->st.clport);
     }
     else {
       msg.type = UNAVAILABLE;
-      logns(logfile, FAILURE, "Returning read request from %s:%d, due to %s being unavailable\n", ip, port, msg.data);
+      logns(FAILURE, "Returning read request from %s:%d, due to %s being unavailable", ip, port, msg.data);
     }
     pthread_mutex_unlock(&(file->lock));
   }
 
-  send_tx(sock, &msg, sizeof(msg), 0);
+  send_tpx(req, sock, &msg, sizeof(msg), 0);
 
-  close_tx(sock);
-  free(req);
+  reqfree(req);
   return NULL;
 }
 
@@ -215,12 +222,11 @@ void* handle_read_completion(void* arg)
 {
   request_t* req = arg;
   message_t msg = req->msg;
-  int sock = req->sock;
 
   char ip[INET_ADDRSTRLEN];
   int port = ntohs(req->addr.sin_port);
-  inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
-  logns(logfile, EVENT, "Received read acknowledgment from %s:%d, for %s\n", ip, port, msg.data);
+  inet_ntop_tpx(req, AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
+  logns(EVENT, "Received read acknowledgment from %s:%d, for %s", ip, port, msg.data);
 
   fnode_t* file = cache_search(&cache, msg.data);
   if (file == NULL) {
@@ -235,8 +241,7 @@ void* handle_read_completion(void* arg)
     pthread_mutex_unlock(&(file->lock));
   }
 
-  close_tx(sock);
-  free(req);
+  reqfree(req);
   return NULL;
 }
 
@@ -248,8 +253,8 @@ void* handle_write(void* arg)
 
   char ip[INET_ADDRSTRLEN];
   int port = ntohs(req->addr.sin_port);
-  inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
-  logns(logfile, EVENT, "Received write request from %s:%d, for %s\n", ip, port, msg.data);
+  inet_ntop_tpx(req, AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
+  logns(EVENT, "Received write request from %s:%d, for %s", ip, port, msg.data);
 
   fnode_t* file = cache_search(&cache, msg.data);
   if (file == NULL) {
@@ -260,17 +265,21 @@ void* handle_write(void* arg)
 
   if (file == 0) {
     msg.type = NOTFOUND;
-    logns(logfile, FAILURE, "Returning write request from %s:%d, for unknown file %s\n", ip, port, msg.data);
+    logns(FAILURE, "Returning write request from %s:%d, for unknown file %s", ip, port, msg.data);
+  }
+  else if (S_ISDIR(file->file.mode)) {
+    msg.type = INVALID;
+    logns(FAILURE, "Returning read request from %s:%d, for directory %s", ip, port, msg.data);
   }
   else {
     pthread_mutex_lock(&(file->lock));
     if (file->rd > 0) {
       msg.type = BEING_READ;
-      logns(logfile, FAILURE, "Returning write request from %s:%d, due to %s being read\n", ip, port, msg.data);
+      logns(FAILURE, "Returning write request from %s:%d, due to %s being read", ip, port, msg.data);
     }
     else if (file->wr != 0) {
       msg.type = XLOCK;
-      logns(logfile, FAILURE, "Returning write request from %s:%d, due to %s being locked\n", ip, port, msg.data);
+      logns(FAILURE, "Returning write request from %s:%d, due to %s being locked", ip, port, msg.data);
     }
     else if (file->loc && file->loc->down == 0) {
       (file->wr)++;
@@ -278,7 +287,7 @@ void* handle_write(void* arg)
       bzero(msg.data, BUFSIZE);
       sprintf(msg.data, "%s", file->loc->st.ip);
       sprintf(msg.data + 32, "%d", file->loc->st.clport); 
-      logns(logfile, COMPLETION, "Redirecting write request from %s:%d, to %s:%d\n", ip, port, file->loc->st.ip, file->loc->st.clport);
+      logns(COMPLETION, "Redirecting write request from %s:%d, to %s:%d", ip, port, file->loc->st.ip, file->loc->st.clport);
     }
     else if (file->bkp1 && file->bkp1->down == 0) {
       (file->wr)++;
@@ -286,7 +295,7 @@ void* handle_write(void* arg)
       bzero(msg.data, BUFSIZE);
       sprintf(msg.data, "%s", file->bkp1->st.ip);
       sprintf(msg.data + 32, "%d", file->bkp1->st.clport); 
-      logns(logfile, COMPLETION, "Redirecting write request from %s:%d, to %s:%d\n", ip, port, file->bkp1->st.ip, file->bkp1->st.clport);
+      logns(COMPLETION, "Redirecting write request from %s:%d, to %s:%d", ip, port, file->bkp1->st.ip, file->bkp1->st.clport);
     }
     else if (file->bkp2 && file->bkp2->down == 0) {
       (file->wr)++;
@@ -294,19 +303,18 @@ void* handle_write(void* arg)
       bzero(msg.data, BUFSIZE);
       sprintf(msg.data, "%s", file->bkp2->st.ip);
       sprintf(msg.data + 32, "%d", file->bkp2->st.clport); 
-      logns(logfile, COMPLETION, "Redirecting write request from %s:%d, to %s:%d\n", ip, port, file->bkp2->st.ip, file->bkp2->st.clport);
+      logns(COMPLETION, "Redirecting write request from %s:%d, to %s:%d", ip, port, file->bkp2->st.ip, file->bkp2->st.clport);
     }
     else {
       msg.type = UNAVAILABLE;
-      logns(logfile, FAILURE, "Returning write request from %s:%d, due to %s being unavailable\n", ip, port, msg.data);
+      logns(FAILURE, "Returning write request from %s:%d, due to %s being unavailable", ip, port, msg.data);
     }
     pthread_mutex_unlock(&(file->lock));
   }
 
-  send_tx(sock, &msg, sizeof(msg), 0);
+  send_tpx(req, sock, &msg, sizeof(msg), 0);
 
-  close_tx(sock);
-  free(req);
+  reqfree(req);
   return NULL;
 }
 
@@ -318,8 +326,8 @@ void* handle_write_completion(void* arg)
 
   char ip[INET_ADDRSTRLEN];
   int port = ntohs(req->addr.sin_port);
-  inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
-  logns(logfile, EVENT, "Received write acknowledgment from %s:%d, for %s\n", ip, port, msg.data);
+  inet_ntop_tpx(req, AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
+  logns(EVENT, "Received write acknowledgment from %s:%d, for %s", ip, port, msg.data);
 
   fnode_t* file = cache_search(&cache, msg.data);
   if (file == NULL) {
@@ -338,30 +346,31 @@ void* handle_write_completion(void* arg)
   metadata_t* info;
 
   msg.type = INFO;
-  send_tx(sock, &msg, sizeof(msg), 0);
-  recv_tx(sock, &msg, sizeof(msg), 0);
+  send_tpx(req, sock, &msg, sizeof(msg), 0);
+  recv_tpx(req, sock, &msg, sizeof(msg), 0);
 
   switch(msg.type)
   {
     case INFO + 1:
       bytes = atoi(msg.data);
-      logns(logfile, COMPLETION, "Receiving %d bytes of metadata from %s:%d", bytes, ip, port);
+      logns(COMPLETION, "Receiving %d bytes of metadata from %s:%d", bytes, ip, port);
       break;
     default:
       goto ret_write_ack;
   }
 
   info = (metadata_t*) malloc(bytes);
+  req->allocptr = info;
   void* ptr = info;
   void* end = ptr + bytes;
 
   while (1)
   {
-    recv_tx(sock, &msg, sizeof(msg), 0);
+    recv_tpx(req, sock, &msg, sizeof(msg), 0);
     switch (msg.type)
     {
       case STOP:
-        logns(logfile, COMPLETION, "Received %d bytes of metadata from %s:%d\n", bytes, ip, port);
+        logns(COMPLETION, "Received %d bytes of metadata from %s:%d", bytes, ip, port);
         trie_update(&files, info);
         goto ret_write_ack;
 
@@ -384,8 +393,7 @@ void* handle_write_completion(void* arg)
   }
 
 ret_write_ack:
-  close_tx(sock);
-  free(req);
+  reqfree(req);
   return NULL;
 }
 
@@ -397,14 +405,14 @@ void* handle_copy(void* arg)
 
   char ip[INET_ADDRSTRLEN];
   int port = ntohs(req->addr.sin_port);
-  inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
-  logns(logfile, EVENT, "Received copy request from %s:%d, for %s\n", ip, port, msg.data);
+  inet_ntop_tpx(req, AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
+  logns(EVENT, "Received copy request from %s:%d, for %s", ip, port, msg.data);
 
   char curpath[PATH_MAX];
   char newpath[PATH_MAX];
 
   sprintf(curpath, "%s", msg.data);
-  recv_tx(sock, &msg, sizeof(msg), 0);
+  recv_tpx(req, sock, &msg, sizeof(msg), 0);
   sprintf(newpath, "%s", msg.data);
 
   fnode_t* curnode = cache_search(&cache, curpath);
@@ -416,7 +424,7 @@ void* handle_copy(void* arg)
 
   if (curnode == NULL) {
     msg.type = NOTFOUND;
-    logns(logfile, FAILURE, "Returning copy request from %s:%d, for unknown file %s\n", ip, port, curpath);
+    logns(FAILURE, "Returning copy request from %s:%d, for unknown file %s", ip, port, curpath);
     goto respond_copy;
   }
 
@@ -432,7 +440,7 @@ void* handle_copy(void* arg)
 
   if (newnode == NULL) {
     msg.type = NOTFOUND;
-    logns(logfile, FAILURE, "Returning copy request from %s:%d, to unknown parent directory %s\n", ip, port, parent);
+    logns(FAILURE, "Returning copy request from %s:%d, to unknown parent directory %s", ip, port, parent);
     goto respond_copy;
   }
 
@@ -449,30 +457,31 @@ void* handle_copy(void* arg)
 
   sprintf(ss_ip, "%s", sender->st.ip);
   ss_port = sender->st.nsport;
-  logns(logfile, PROGRESS, "Redirecting create file request from %s:%d, to %s:%d\n", ip, port, ss_ip, ss_port);
+  logns(PROGRESS, "Redirecting create file request from %s:%d, to %s:%d", ip, port, ss_ip, ss_port);
 
   struct sockaddr_in addr;
   memset(&addr, '\0', sizeof(addr));
   addr.sin_family = AF_INET;
   addr.sin_port = htons(ss_port);
-  addr.sin_addr.s_addr = inet_addr_tx(ss_ip);
+  addr.sin_addr.s_addr = inet_addr_tpx(req, ss_ip);
 
-  int ss_sock = socket_tx(AF_INET, SOCK_STREAM, 0);
+  int ss_sock = socket_tpx(req, AF_INET, SOCK_STREAM, 0);
+  req->newsock = ss_sock;
   connect_t(ss_sock, (struct sockaddr*) &addr, sizeof(addr));
   
   if (stequal(sender->st, receiver->st)) {
     msg.type = COPY_INTERNAL;
     sprintf(msg.data, "%s", curpath);
-    send_tx(ss_sock, &msg, sizeof(msg), 0);
+    send_tpx(req, ss_sock, &msg, sizeof(msg), 0);
     sprintf(msg.data, "%s", newpath);
-    send_tx(ss_sock, &msg, sizeof(msg), 0);
-    logns(logfile, PROGRESS, "Forwared copy request to %s:%d, for %s\n", ss_ip, ss_port, curpath);
+    send_tpx(req, ss_sock, &msg, sizeof(msg), 0);
+    logns(PROGRESS, "Forwared copy request to %s:%d, for %s", ss_ip, ss_port, curpath);
 
-    recv_tx(ss_sock, &msg, sizeof(msg), 0);
+    recv_tpx(req, ss_sock, &msg, sizeof(msg), 0);
     switch(msg.type)
     {
       case COPY_INTERNAL + 1:
-        logns(logfile, COMPLETION, "Received copy acknowledgment from %s:%d, for %s\n", ss_ip, ss_port, curpath);
+        logns(COMPLETION, "Received copy acknowledgment from %s:%d, for %s", ss_ip, ss_port, curpath);
         msg.type = COPY + 1;
         break;
       
@@ -482,31 +491,30 @@ void* handle_copy(void* arg)
   else {
     msg.type = COPY_ACROSS;
     sprintf(msg.data, "%s", curpath);
-    send_tx(ss_sock, &msg, sizeof(msg), 0);
+    send_tpx(req, ss_sock, &msg, sizeof(msg), 0);
     sprintf(msg.data, "%s", newpath);
-    send_tx(ss_sock, &msg, sizeof(msg), 0);
+    send_tpx(req, ss_sock, &msg, sizeof(msg), 0);
     sprintf(msg.data, "%s", receiver->st.ip);
     sprintf(msg.data + 32, "%d", receiver->st.stport);
-    send_tx(ss_sock, &msg, sizeof(msg), 0);
-    logns(logfile, PROGRESS, "Forwarded copy request to %s:%d, for %s\n", ss_ip, ss_port, curpath);
+    send_tpx(req, ss_sock, &msg, sizeof(msg), 0);
+    logns(PROGRESS, "Forwarded copy request to %s:%d, for %s", ss_ip, ss_port, curpath);
 
-    recv_tx(ss_sock, &msg, sizeof(msg), 0);
+    recv_tpx(req, ss_sock, &msg, sizeof(msg), 0);
     switch(msg.type)
     {
       case COPY_ACROSS + 1:
-        logns(logfile, COMPLETION, "Received copy acknowledgment from %s:%d, for %s\n", ss_ip, ss_port, curpath);
+        logns(COMPLETION, "Received copy acknowledgment from %s:%d, for %s", ss_ip, ss_port, curpath);
         msg.type = COPY + 1;
         break;
       
       default:
     }
   }
-  close_tx(ss_sock);
+  close_tpx(req, ss_sock);
 
 respond_copy:
-  send_tx(sock, &msg, sizeof(msg), 0);
-  close_tx(sock);
-  free(req);
+  send_tpx(req, sock, &msg, sizeof(msg), 0);
+  reqfree(req);
   return NULL;
 }
 
@@ -530,13 +538,15 @@ void request_delete(fnode_t* node)
 
 void request_delete_worker(fnode_t* node, snode_t* snode)
 {
-  int sock = socket_tx(AF_INET, SOCK_STREAM, 0);
+  request_t* req = reqalloc();
+  int sock = socket_tpx(req, AF_INET, SOCK_STREAM, 0);
+  req->sock = sock;
 
   struct sockaddr_in addr;
   memset(&addr, '\0', sizeof(addr));
   addr.sin_family = AF_INET;
   addr.sin_port = htons(snode->st.nsport);
-  addr.sin_addr.s_addr = inet_addr_tx(snode->st.ip);
+  addr.sin_addr.s_addr = inet_addr_tpx(req, snode->st.ip);
 
   connect_t(sock, (struct sockaddr*) &addr, sizeof(addr));
 
@@ -545,18 +555,18 @@ void request_delete_worker(fnode_t* node, snode_t* snode)
   bzero(msg.data, BUFSIZE);
   strcpy(msg.data, node->file.path);
 
-  send_tx(sock, &msg, sizeof(msg), 0);
-  recv_tx(sock, &msg, sizeof(msg), 0);
+  send_tpx(req, sock, &msg, sizeof(msg), 0);
+  recv_tpx(req, sock, &msg, sizeof(msg), 0);
 
   switch (msg.type)
   {
     case DELETE + 1:
-      logns(logfile, COMPLETION, "Received delete acknowledgement, from %s:%d, for %s\n", snode->st.ip, snode->st.nsport, node->file.path); break;
+      logns(COMPLETION, "Received delete acknowledgement, from %s:%d, for %s", snode->st.ip, snode->st.nsport, node->file.path); break;
     default:
-      logns(logfile, FAILURE, "Failed to receive delete acknowledgement, from %s:%d, for %s\n", snode->st.ip, snode->st.nsport, node->file.path);
+      logns(FAILURE, "Failed to receive delete acknowledgement, from %s:%d, for %s", snode->st.ip, snode->st.nsport, node->file.path);
   }
 
-  close_tx(sock);
+  reqfree(req);
 }
 
 void request_replicate(fnode_t* node)

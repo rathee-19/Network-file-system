@@ -2,102 +2,41 @@
 
 extern logfile_t* logfile;
 
-void nsnotify(int nsport, int clport, int stport, char* paths, int n)
-{
-  int sock = socket_tx(AF_INET, SOCK_STREAM, 0);
-
-  struct sockaddr_in addr;
-  memset(&addr, '\0', sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(NSPORT);
-  addr.sin_addr.s_addr = inet_addr_tx(NSIP);
-
-  connect_t(sock, (struct sockaddr*) &addr, sizeof(addr));
-  logst(logfile, STATUS, "Connected to the naming server\n");
-
-  int bytes = 0;
-  void* info = (void*) dirinfo(paths, n, &bytes);
-
-  message_t msg;
-  msg.type = JOIN;
-  bzero(msg.data, BUFSIZE);
-  sprintf(msg.data, "%s", IP);
-  sprintf(msg.data + 32, "%d", nsport);
-  sprintf(msg.data + 64, "%d", clport);
-  sprintf(msg.data + 96, "%d", stport);
-  sprintf(msg.data + 128, "%d", bytes);
-
-  send_tx(sock, &msg, sizeof(msg), 0);
-
-  int sent = 0;
-  while (sent < bytes) {
-    if (bytes - sent >= BUFSIZE) {
-      memcpy(msg.data, info + sent, BUFSIZE);
-      send_tx(sock, &msg, sizeof(msg), 0);
-      sent += BUFSIZE;
-    }
-    else {
-      bzero(msg.data, BUFSIZE);
-      memcpy(msg.data, info + sent, bytes - sent);
-      send_tx(sock, &msg, sizeof(msg), 0);
-      sent = bytes;
-    }
-  }
-
-  msg.type = STOP;
-  send_tx(sock, &msg, sizeof(msg), 0);
-  logst(logfile, PROGRESS, "Sent %d bytes to the naming server\n", bytes);
-
-  recv_tx(sock, &msg, sizeof(msg), 0);
-  if (msg.type != JOIN + 1) {
-    logst(logfile, FAILURE, "Failed to register with the naming server\n");
-    exit(1);
-  }
-  logst(logfile, COMPLETION, "Registered with the naming server\n");
-
-  close_tx(sock);
-
-  pthread_t server, client, storage;
-  pthread_create_tx(&server, NULL, nslisten, &nsport);
-  pthread_create_tx(&client, NULL, cllisten, &clport);
-  pthread_create_tx(&storage, NULL, stlisten, &stport);
-
-  logst(logfile, STATUS, "Started the listener threads\n");
-  
-  pthread_join(server, NULL);
-  pthread_join(client, NULL);
-  pthread_join(storage, NULL);
-}
-
 void* nslisten(void* arg)
 {
   int port = *((int*) arg);
+  request_t* req = reqalloc();
 
-  int sock = socket_tx(AF_INET, SOCK_STREAM, 0);
+  int sock = socket_tpx(req, AF_INET, SOCK_STREAM, 0);
+  req->sock = sock;
 
   struct sockaddr_in addr;
   memset(&addr, '\0', sizeof(addr));
   addr.sin_family = AF_INET;
   addr.sin_port = htons(port);
-  addr.sin_addr.s_addr = inet_addr_tx(IP);
+  addr.sin_addr.s_addr = inet_addr_tpx(req, IP);
 
-  bind_tx(sock, (struct sockaddr*) &addr, sizeof(addr));
-  listen_tx(sock, 50);
+  bind_t(sock, (struct sockaddr*) &addr, sizeof(addr));
+  listen_tpx(req, sock, 50);
 
   while (1)
   {
-    pthread_t worker;
-    request_t* req = (request_t*) calloc(1, sizeof(request_t));
-    req->addr_size = sizeof(req->addr);
-
-    req->sock = accept_tx(sock, (struct sockaddr*) &(req->addr), &(req->addr_size));
+    req->allocptr = NULL;
+    req->newsock = accept_tx(sock, (struct sockaddr*) &(req->addr), &(req->addrlen));
     
     char ip[INET_ADDRSTRLEN];
     int port = ntohs(req->addr.sin_port);
-    inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
-    logst(logfile, EVENT, "Accepted connection from %s:%d\n", ip, port);
+    inet_ntop_tpx(req, AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
+    logst(EVENT, "Accepted connection from %s:%d", ip, port);
 
-    pthread_create_tx(&worker, NULL, thread_assignment_ns, req);
+    request_t* newreq = reqalloc();
+    req->allocptr = (void*) newreq;
+    newreq->sock = req->newsock;
+    newreq->addr = req->addr;
+    newreq->addrlen = req->addrlen;
+
+    pthread_t worker;
+    pthread_create_tx(&worker, NULL, thread_assignment_ns, newreq);
   }
 
   return NULL;
@@ -106,7 +45,7 @@ void* nslisten(void* arg)
 void* thread_assignment_ns(void* arg)
 {
   request_t* req = arg;
-  recv_tx(req->sock, &(req->msg), sizeof(req->msg), 0);
+  recv_tpx(req, req->sock, &(req->msg), sizeof(req->msg), 0);
 
   switch (req->msg.type)
   {
@@ -139,13 +78,13 @@ void* handle_copy_internal(void* arg)
   message_t msg = req->msg;
   int sock = req->sock;
 
-  logst(logfile, EVENT, "Received copy file request from naming server, for %s\n", msg.data);
+  logst(EVENT, "Received copy file request from naming server, for %s", msg.data);
 
   char curpath[PATH_MAX];
   char newpath[PATH_MAX];
 
   sprintf(curpath, "%s", msg.data);
-  recv_tx(sock, &msg, sizeof(msg), 0);
+  recv_tpx(req, sock, &msg, sizeof(msg), 0);
   sprintf(newpath, "%s", msg.data);
 
   struct stat st;
@@ -188,7 +127,7 @@ void* handle_copy_internal(void* arg)
 
       n = err;
       if (n == 0) {
-        logst(logfile, COMPLETION, "Completed copy file request, for %s\n", curpath);
+        logst(COMPLETION, "Completed copy file request, for %s", curpath);
         msg.type = COPY_INTERNAL + 1;
         close(src_fd);
         close(dst_fd);
@@ -206,9 +145,8 @@ void* handle_copy_internal(void* arg)
   }
 
 ret_copy_internal:
-  send_tx(sock, &msg, sizeof(msg), 0);
-  close(sock);
-  free(req);
+  send_tpx(req, sock, &msg, sizeof(msg), 0);
+  reqfree(req);
   return NULL;
 }
 
@@ -218,18 +156,18 @@ void* handle_create_dir(void* arg)
   message_t msg = req->msg;
   int sock = req->sock;
 
-  logst(logfile, EVENT, "Received create directory request from naming server, for %s\n", msg.data);
+  logst(EVENT, "Received create directory request from naming server, for %s", msg.data);
 
   struct stat st;
   if (stat(msg.data, &st) < 0) {
     if ((mkdir(msg.data, 0777) < 0) || (stat(msg.data, &st) < 0)) {
       msg.type = UNAVAILABLE;
-      send_tx(sock, &msg, sizeof(msg), 0);
+      send_tpx(req, sock, &msg, sizeof(msg), 0);
       goto ret_create_dir;
     }
   }
 
-  logst(logfile, COMPLETION, "Created directory %s\n", msg.data);
+  logst(COMPLETION, "Created directory %s", msg.data);
 
   metadata_t info;
   strcpy(info.path, msg.data);
@@ -241,31 +179,31 @@ void* handle_create_dir(void* arg)
   msg.type = CREATE_DIR + 1;
   int bytes = sizeof(metadata_t);
   sprintf(msg.data, "%ld", sizeof(metadata_t));
-  send_tx(sock, &msg, sizeof(msg), 0);
-  logst(logfile, PROGRESS, "Sending %d bytes of metadata to naming server\n", bytes);
+  send_tpx(req, sock, &msg, sizeof(msg), 0);
+  logst(PROGRESS, "Sending %d bytes of metadata to naming server", bytes);
 
   int sent = 0;
   void* ptr = &info;
   while (sent < bytes) {
     if (bytes - sent >= BUFSIZE) {
       memcpy(msg.data, ptr + sent, BUFSIZE);
-      send_tx(sock, &msg, sizeof(msg), 0);
+      send_tpx(req, sock, &msg, sizeof(msg), 0);
       sent += BUFSIZE;
     }
     else {
       bzero(msg.data, BUFSIZE);
       memcpy(msg.data, ptr + sent, bytes - sent);
-      send_tx(sock, &msg, sizeof(msg), 0);
+      send_tpx(req, sock, &msg, sizeof(msg), 0);
       sent = bytes;
     }
   }
 
   msg.type = STOP;
-  send_tx(sock, &msg, sizeof(msg), 0);
-  logst(logfile, COMPLETION, "Sent %d bytes of metadata to naming server\n", bytes);
+  send_tpx(req, sock, &msg, sizeof(msg), 0);
+  logst(COMPLETION, "Sent %d bytes of metadata to naming server", bytes);
 
 ret_create_dir:
-  close_tx(sock);
+  reqfree(req);
   return NULL;
 }
 
@@ -275,24 +213,25 @@ void* handle_create_file(void* arg)
   message_t msg = req->msg;
   int sock = req->sock;
 
-  logst(logfile, EVENT, "Received create file request from naming server, for %s\n", msg.data);
+  logst(EVENT, "Received create file request from naming server, for %s", msg.data);
   
   FILE* file = fopen(msg.data, "w");
   if (file == NULL) {
     msg.type = UNAVAILABLE;
-    send_tx(sock, &msg, sizeof(msg), 0);
+    send_tpx(req, sock, &msg, sizeof(msg), 0);
     goto ret_create_file;
   }
   
   struct stat st;
   if (stat(msg.data, &st) < 0) {
     msg.type = UNAVAILABLE;
-    send_tx(sock, &msg, sizeof(msg), 0);
+    fclose(file);
+    send_tpx(req, sock, &msg, sizeof(msg), 0);
     goto ret_create_file;
   }
 
   fclose(file);
-  logst(logfile, COMPLETION, "Created file %s\n", msg.data);
+  logst(COMPLETION, "Created file %s", msg.data);
 
   metadata_t info;
   strcpy(info.path, msg.data);
@@ -304,31 +243,31 @@ void* handle_create_file(void* arg)
   msg.type = CREATE_FILE + 1;
   int bytes = sizeof(metadata_t);
   sprintf(msg.data, "%ld", sizeof(metadata_t));
-  send_tx(sock, &msg, sizeof(msg), 0);
-  logst(logfile, PROGRESS, "Sending %d bytes to naming server\n", bytes);
+  send_tpx(req, sock, &msg, sizeof(msg), 0);
+  logst(PROGRESS, "Sending %d bytes to naming server", bytes);
 
   int sent = 0;
   void* ptr = &info;
   while (sent < bytes) {
     if (bytes - sent >= BUFSIZE) {
       memcpy(msg.data, ptr + sent, BUFSIZE);
-      send_tx(sock, &msg, sizeof(msg), 0);
+      send_tpx(req, sock, &msg, sizeof(msg), 0);
       sent += BUFSIZE;
     }
     else {
       bzero(msg.data, BUFSIZE);
       memcpy(msg.data, ptr + sent, bytes - sent);
-      send_tx(sock, &msg, sizeof(msg), 0);
+      send_tpx(req, sock, &msg, sizeof(msg), 0);
       sent = bytes;
     }
   }
 
   msg.type = STOP;
-  send_tx(sock, &msg, sizeof(msg), 0);
-  logst(logfile, COMPLETION, "Sent %d bytes of metadata to naming server\n", bytes);
+  send_tpx(req, sock, &msg, sizeof(msg), 0);
+  logst(COMPLETION, "Sent %d bytes of metadata to naming server", bytes);
 
 ret_create_file:
-  close_tx(sock);
+  reqfree(req);
   return NULL;
 }
 
@@ -340,9 +279,9 @@ void* handle_delete(void* arg)
 
   remove(msg.data);
   msg.type = DELETE + 1;
-  send_tx(sock, &msg, sizeof(msg), 0);
+  send_tpx(req, sock, &msg, sizeof(msg), 0);
 
-  close_tx(sock);
+  reqfree(req);
   return NULL;
 }
 
@@ -355,13 +294,13 @@ void* handle_ping(void* arg)
   char ip[INET_ADDRSTRLEN];
   int port = ntohs(req->addr.sin_port);
   inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
-  logst(logfile, EVENT, "Received ping from %s:%d\n", ip, port);
+  logst(EVENT, "Received ping from %s:%d", ip, port);
 
   msg.type = PING + 1;
-  send_tx(sock, &msg, sizeof(msg), 0);
-  logst(logfile, COMPLETION, "Sent ping acknowledgement to %s:%d\n", ip, port);
+  send_tpx(req, sock, &msg, sizeof(msg), 0);
+  logst(COMPLETION, "Sent ping acknowledgement to %s:%d", ip, port);
 
-  close_tx(sock);
+  reqfree(req);
   return NULL;
 }
 

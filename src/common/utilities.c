@@ -1,24 +1,14 @@
-#include "api.h"
 #include <time.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <stdarg.h>
 #include <string.h>
+#include "api.h"
+#include "colors.h"
 #include "utilities.h"
 
-void get_permissions(char *perms, mode_t mode)
-{
-  strcpy(perms, "----------");
-  if (S_ISDIR(mode)) perms[0] = 'd';
-  if (mode & S_IRUSR) perms[1] = 'r';
-  if (mode & S_IWUSR) perms[2] = 'w';
-  if (mode & S_IXUSR) perms[3] = 'x';
-  if (mode & S_IRGRP) perms[4] = 'r';
-  if (mode & S_IWGRP) perms[5] = 'w';
-  if (mode & S_IXGRP) perms[6] = 'x';
-  if (mode & S_IROTH) perms[7] = 'r';
-  if (mode & S_IWOTH) perms[8] = 'w';
-  if (mode & S_IXOTH) perms[9] = 'x';
-}
+extern logfile_t* logfile;
 
 void timestamp(FILE* stream)
 {
@@ -33,7 +23,7 @@ void timestamp(FILE* stream)
   fprintf(stream, "\033[90m" "%s " "\033[0m", buffer);
 }
 
-void logevent(enum caller c, logfile_t* logfile, enum level lvl, const char* message, ...)
+void logevent(enum caller c, enum level lvl, const char* message, ...)
 {
   pthread_mutex_lock(&(logfile->lock));
   va_list args;
@@ -43,29 +33,39 @@ void logevent(enum caller c, logfile_t* logfile, enum level lvl, const char* mes
   {
     case STATUS:
       timestamp(stdout);
+      fprintf(stdout, ORANGE);
       vfprintf(stdout, message, args);
+      fprintf(stdout, RESET "\n");
       break;
 
     case EVENT:
       timestamp(stdout);
+      fprintf(stdout, CYAN);
       vfprintf(stdout, message, args);
+      fprintf(stdout, RESET "\n");
       break;
 
     case PROGRESS:
 #ifdef DEBUG
       timestamp(stdout);
+      fprintf(stdout, MAGENTA);
       vfprintf(stdout, message, args);
+      fprintf(stdout, RESET "\n");
 #endif
       break;
 
     case COMPLETION:
       timestamp(stdout);
+      fprintf(stdout, GREEN);
       vfprintf(stdout, message, args);
+      fprintf(stdout, RESET "\n");
       break;
     
     case FAILURE:
       timestamp(stderr);
+      fprintf(stdout, RED);
       vfprintf(stderr, message, args);
+      fprintf(stdout, RESET "\n");
       break;
   }
 
@@ -80,6 +80,43 @@ void logevent(enum caller c, logfile_t* logfile, enum level lvl, const char* mes
 
   va_end(args);
   pthread_mutex_unlock(&(logfile->lock));
+}
+
+request_t* reqalloc(void)
+{
+  request_t* req = (request_t*) calloc(1, sizeof(request_t));
+  if (req == 0)
+    perror_tx("calloc");
+  req->sock = -1;
+  req->newsock = -1;
+  req->addrlen = sizeof(req->addr);
+  return req;
+}
+
+void reqfree(request_t* req)
+{
+  if (req->sock != -1)
+    close(req->sock);
+  if (req->newsock != -1)
+    close(req->newsock);
+  if (req->allocptr != NULL)
+    free(req->allocptr);
+  free(req);
+}
+
+void get_permissions(char* perms, mode_t mode)
+{
+  strcpy(perms, "----------");
+  if (S_ISDIR(mode)) perms[0] = 'd';
+  if (mode & S_IRUSR) perms[1] = 'r';
+  if (mode & S_IWUSR) perms[2] = 'w';
+  if (mode & S_IXUSR) perms[3] = 'x';
+  if (mode & S_IRGRP) perms[4] = 'r';
+  if (mode & S_IWGRP) perms[5] = 'w';
+  if (mode & S_IXGRP) perms[6] = 'x';
+  if (mode & S_IROTH) perms[7] = 'r';
+  if (mode & S_IWOTH) perms[8] = 'w';
+  if (mode & S_IXOTH) perms[9] = 'x';
 }
 
 void get_parent_dir(char* dest, char* src)

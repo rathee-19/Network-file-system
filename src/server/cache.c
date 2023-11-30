@@ -5,7 +5,7 @@ void cache_init(cache_t* C)
 {
   for (int i = 0; i < CACHE_SIZE; i++)
     C->files[i] = NULL;
-  pthread_mutex_init(&(C->lock), NULL);
+  pthread_mutex_init_tx(&(C->lock), NULL);
 }
 
 void cache_insert(cache_t* C, fnode_t* node)

@@ -7,23 +7,31 @@ queue_t qrep;
 cache_t cache;
 logfile_t* logfile;
 
-int main(void)
+int main(int argc, char* argv[])
 {
+#ifdef LOG
+  if (argc < 2) {
+    fprintf(stderr, "usage: %s <logfile>\n", argv[0]);
+    exit(1);
+  }
+  logfile = (logfile_t*) calloc(1, sizeof(logfile_t));
+  strcpy(logfile->path, argv[1]);
+  pthread_mutex_init_tx(&(logfile->lock), NULL);
+
+#else
+  logfile = (logfile_t*) calloc(1, sizeof(logfile_t));
+  logfile->path[0] = 0;
+  pthread_mutex_init_tx(&(logfile->lock), NULL);
+
+#endif
+  
+  signal_tx(SIGPIPE, SIG_IGN);
+
   list_init(&storage);
   trie_init(&files);
   queue_init(&qdel);
   queue_init(&qrep);
   cache_init(&cache);
-
-#ifdef LOG
-  logfile = (logfile_t*) calloc(1, sizeof(logfile_t));
-  sprintf(logfile->path, "serverlog");
-  pthread_mutex_init(&(logfile->lock), NULL);
-#else
-  logfile = (logfile_t*) calloc(1, sizeof(logfile_t));
-  logfile->path[0] = 0;
-  pthread_mutex_init(&(logfile->lock), NULL);
-#endif
 
   pthread_t ping;
   pthread_create_tx(&ping, NULL, stping, NULL);
@@ -39,21 +47,19 @@ int main(void)
   addr.sin_port = htons(NSPORT);
   addr.sin_addr.s_addr = inet_addr_tx(NSIP);
 
-  bind_tx(sock, (struct sockaddr*) &addr, sizeof(addr));
+  bind_t(sock, (struct sockaddr*) &addr, sizeof(addr));
   listen_tx(sock, 50);                                          // TODO: IMP: how much backlog can we tolerate??
 
   while (1)
   {
     pthread_t worker;
-    request_t* req = (request_t*) calloc(1, sizeof(request_t));
-    req->addr_size = sizeof(req->addr);
-
-    req->sock = accept_tx(sock, (struct sockaddr*) &(req->addr), &(req->addr_size));
+    request_t* req = reqalloc();
+    req->sock = accept_tx(sock, (struct sockaddr*) &(req->addr), &(req->addrlen));
     
     char ip[INET_ADDRSTRLEN];
     int port = ntohs(req->addr.sin_port);
     inet_ntop(AF_INET, &(req->addr.sin_addr), ip, INET_ADDRSTRLEN);
-    logns(logfile, EVENT, "Accepted connection from %s:%d\n", ip, port);
+    logns(EVENT, "Accepted connection from %s:%d", ip, port);
 
     pthread_create_tx(&worker, NULL, thread_assignment, req);
   }
@@ -65,7 +71,7 @@ int main(void)
 void* thread_assignment(void* arg)
 {
   request_t* req = arg;
-  recv_tx(req->sock, &(req->msg), sizeof(req->msg), 0);
+  recv_tpx(req, req->sock, &(req->msg), sizeof(req->msg), 0);
 
   switch(req->msg.type)
   {

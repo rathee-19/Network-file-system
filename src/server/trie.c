@@ -9,7 +9,7 @@ fnode_t* trie_node(void)
 {
   fnode_t* node = (fnode_t*) calloc(1, sizeof(fnode_t));
   node->valid = 0;
-  pthread_mutex_init(&node->lock, NULL);
+  pthread_mutex_init_tx(&node->lock, NULL);
   return node;
 }
 
@@ -24,11 +24,11 @@ enum t_ret trie_insert(trie_t* T, metadata_t* file, snode_t* loc)
 {
   int len = strlen(file->path);
   if (len == 0) {
-    logns(logfile, FAILURE, "Invalid file from %s:%d\n", loc->st.ip, loc->st.nsport);
+    logns(PROGRESS, "Invalid file from %s:%d", loc->st.ip, loc->st.nsport);
     return T_INVALID;
   }
 
-  if (file->path[len - 1] == '/') {
+  if (len > 1 && file->path[len - 1] == '/') {
     file->path[len - 1] = 0;
     len--;
   }
@@ -48,7 +48,7 @@ enum t_ret trie_insert(trie_t* T, metadata_t* file, snode_t* loc)
 
   if (temp->valid == 1) {
     pthread_mutex_unlock(&T->lock);
-    logns(logfile, FAILURE, "Already exists: %s\n", file->path);
+    logns(PROGRESS, "File already exists: %s", file->path);
     return T_EXISTS;
   }
   
@@ -57,7 +57,7 @@ enum t_ret trie_insert(trie_t* T, metadata_t* file, snode_t* loc)
   temp->valid = 1;
   T->num++;
   pthread_mutex_unlock(&T->lock);
-  logns(logfile, PROGRESS, "Added: %s\n", temp->file.path);
+  logns(PROGRESS, "Added file: %s", temp->file.path);
   queue_insert(&qrep, temp);
   return T_SUCCESS;
 }
@@ -91,7 +91,7 @@ enum t_ret trie_update(trie_t* T, metadata_t* file)
     pthread_mutex_lock(&(temp->lock));
     temp->file = *file;
     pthread_mutex_unlock(&(temp->lock));
-    logns(logfile, PROGRESS, "Updated: %s\n", file->path);
+    logns(PROGRESS, "Updated file: %s", file->path);
     return T_SUCCESS;
   }
   

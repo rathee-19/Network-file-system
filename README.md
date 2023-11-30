@@ -1,11 +1,37 @@
 # Network File System
 
-## Storage Server
+## Steps to run
 
-1. Every storage server is uniquely identified by its port number dedicated to the naming server.
+1. Run in default mode.
 
-2. The server searches for a directory with the same identifier, using it as the root for all its operations.
+```sh
+make
+./server
+./storage <nsport> <clport> <stport>
+./client
+```
 
-3. For the client port, we just increment the identifier by 1.
+2. Run in debug mode.
 
-4. We also maintain a special port for copying files among the storage servers, obtained by incrementing the identifier by 2.
+```sh
+make debug
+...
+```
+
+3. Run in logging mode.
+
+```sh
+make log
+./server <logfile>
+./storage <nsport> <clport> <stport> <logfile>
+./client <logfile>
+```
+
+4. Run in both logging and debug mode.
+
+```sh
+make ldebug
+...
+```
+
+Note: The server, by definition, uses ``NSPORT 7001``. Be considerate of that when initialising the storage servers.

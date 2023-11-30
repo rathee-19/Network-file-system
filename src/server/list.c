@@ -10,7 +10,7 @@ void list_init(list_t* L)
   L->head->st.stport = -1;
   L->head->prev = L->head;
   L->head->next = L->head;
-  pthread_mutex_init(&L->lock, NULL);
+  pthread_mutex_init_tx(&L->lock, NULL);
 }
 
 snode_t* list_insert(list_t* L, storage_t st)

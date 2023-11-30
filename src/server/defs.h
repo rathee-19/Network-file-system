@@ -7,6 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <signal.h>
 #include <pthread.h>
 #include <arpa/inet.h>
 #include "../common/api.h"
@@ -21,10 +22,10 @@
 #define PING_TOLERANCE 3      // number of consecutives ping misses to be tolerated
 #define CRAWL_SLEEP 15        // ... seconds
 
-#define logns(logfile, level, ...) logevent(SERVER, logfile, level, __VA_ARGS__)
+#define logns(level, ...) logevent(SERVER, level, __VA_ARGS__)
 
 // main.c
-int main(void);
+int main(int argc, char* argv[]);
 void* thread_assignment(void* arg);
 
 // client.c

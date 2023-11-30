@@ -12,14 +12,16 @@ int main(int argc, char *argv[])
   }
   logfile = (logfile_t*) calloc(1, sizeof(logfile_t));
   strcpy(logfile->path, argv[1]);
-  pthread_mutex_init(&(logfile->lock), NULL);
+  pthread_mutex_init_tx(&(logfile->lock), NULL);
 
 #else
   logfile = (logfile_t*) calloc(1, sizeof(logfile_t));
   logfile->path[0] = 0;
-  pthread_mutex_init(&(logfile->lock), NULL);
+  pthread_mutex_init_tx(&(logfile->lock), NULL);
 
 #endif
+
+  signal_tx(SIGPIPE, SIG_IGN);
 
   while (1)
   {
@@ -99,18 +101,18 @@ void request_read(void)
     case READ + 1:
       strncpy(ip, msg.data, INET_ADDRSTRLEN);
       port = atoi(msg.data + 32);
-      logc(logfile, PROGRESS, "Sending request to storage server %s:%d\n", ip, port);
+      logc(PROGRESS, "Sending request to storage server %s:%d", ip, port);
       goto connect_read;
     case NOTFOUND:
-      logc(logfile, FAILURE, "%s was not found\n", path); return;
+      logc(FAILURE, "%s was not found", path); return;
     case UNAVAILABLE:
-      logc(logfile, FAILURE, "%s is unavailable currently\n", path); return;
+      logc(FAILURE, "%s is unavailable currently", path); return;
     case XLOCK:
-      logc(logfile, FAILURE, "%s is being written to by a client\n", path); return;
+      logc(FAILURE, "%s is being written to by a client", path); return;
     case PERM:
-      logc(logfile, FAILURE, "Missing permissions for read\n"); return;
+      logc(FAILURE, "Missing permissions for read"); return;
     default:
-      invalid_response(msg.type); return;
+      logc(FAILURE, "Received an invalid response %d from the server", msg.type); return;
   }
 
 connect_read:
@@ -130,32 +132,34 @@ connect_read:
   recv_tx(ss_sock, &msg, sizeof(msg), 0);
 
   int bytes;
-  FILE* file;
+  FILE* file = fopen_tx(localpath, "w+");
   
   switch(msg.type)
   {
     case READ + 1:
       bytes = atoi(msg.data);
-      logc(logfile, PROGRESS, "Receiving %d bytes from storage server %s:%d\n", bytes, ip, port);
+      logc(PROGRESS, "Receiving %d bytes from storage server %s:%d", bytes, ip, port);
       goto recv_read;
     case NOTFOUND:
-      logc(logfile, FAILURE, "%s was not found\n", path); return;
+      logc(FAILURE, "%s was not found", path);
+      goto ret_read;
     case PERM:
-      logc(logfile, FAILURE, "Missing permissions for read\n"); return;
+      logc(FAILURE, "Missing permissions for read");
+      goto ret_read;
     default:
-      invalid_response(msg.type); return;
+      logc(FAILURE, "Received an invalid response %d from the server", msg.type);
+      goto ret_read;
   }
 
 recv_read:
-  file = fopen_tx(localpath, "w+");
   int left = bytes;
-
   while (1)
   {
     recv_tx(ss_sock, &msg, sizeof(msg), 0);
     switch (msg.type)
     {
       case STOP:
+        logc(COMPLETION, "Received %d bytes from storage server %s:%d", bytes, ip, port);
         goto ret_read;
 
       case READ + 1:
@@ -171,12 +175,12 @@ recv_read:
         }
 
       default:
-        invalid_response(msg.type); return;
+        logc(FAILURE, "Received an invalid response %d from the server", msg.type);
+        goto ret_read;
     }
   }
 
 ret_read:
-  logc(logfile, COMPLETION, "Received %d bytes from storage server %s:%d\n", bytes, ip, port);
   fclose_tx(file);
   close_tx(ss_sock);
 }
@@ -207,22 +211,22 @@ void request_write(void)
     case WRITE + 1:
       strncpy(ip, msg.data, INET_ADDRSTRLEN);
       port = atoi(msg.data + 32);
-      logc(logfile, PROGRESS, "Sending request to storage server %s:%d\n", ip, port);
+      logc(PROGRESS, "Sending request to storage server %s:%d", ip, port);
       goto connect_write;
     case NOTFOUND:
-      logc(logfile, FAILURE, "%s was not found\n", path); return;
+      logc(FAILURE, "%s was not found", path); return;
     case UNAVAILABLE:
-      logc(logfile, FAILURE, "%s is unavailable currently\n", path); return;
+      logc(FAILURE, "%s is unavailable currently", path); return;
     case BEING_READ:
-      logc(logfile, FAILURE, "%s is being read currently\n", path); return;
+      logc(FAILURE, "%s is being read currently", path); return;
     case RDONLY:
-      logc(logfile, FAILURE, "%s has been marked read-only\n", path); return;
+      logc(FAILURE, "%s has been marked read-only", path); return;
     case XLOCK:
-      logc(logfile, FAILURE, "%s is being written to by a client\n", path); return;
+      logc(FAILURE, "%s is being written to by a client", path); return;
     case PERM:
-      logc(logfile, FAILURE, "Missing permissions for write\n"); return;
+      logc(FAILURE, "Missing permissions for write"); return;
     default:
-      invalid_response(msg.type); return;
+      logc(FAILURE, "Received an invalid response %d from the server", msg.type); return;
   }
 
 connect_write:
@@ -241,32 +245,34 @@ connect_write:
   send_tx(ss_sock, &msg, sizeof(msg), 0);
   recv_tx(ss_sock, &msg, sizeof(msg), 0);
 
-  int bytes;
-  FILE* file;
+  FILE* file = fopen_tx(localpath, "r");
   struct stat st;
+  stat(localpath, &st);
+  int bytes = st.st_size;
   
   switch(msg.type)
   {
     case WRITE + 1:
+      logc(PROGRESS, "Sending %d bytes to storage server %s:%d", bytes, ip, port);
       goto send_write;
     case NOTFOUND:
-      logc(logfile, FAILURE, "%s was not found\n", path); return;
+      logc(FAILURE, "%s was not found", path);
+      goto ret_write;
     case RDONLY:
-      logc(logfile, FAILURE, "%s has been marked read-only\n", path); return;
+      logc(FAILURE, "%s has been marked read-only", path);
+      goto ret_write;
     case XLOCK:
-      logc(logfile, FAILURE, "%s is being written to by a client\n", path); return;
+      logc(FAILURE, "%s is being written to by a client", path);
+      goto ret_write;
     case PERM:
-      logc(logfile, FAILURE, "Missing permissions for write\n"); return;
+      logc(FAILURE, "Missing permissions for write");
+      goto ret_write;
     default:
-      invalid_response(msg.type); return;
+      logc(FAILURE, "Received an invalid response %d from the server", msg.type);
+      goto ret_write;
   }
 
 send_write:
-  file = fopen_tx(localpath, "r");
-  stat(localpath, &st);
-  bytes = st.st_size;
-  logc(logfile, PROGRESS, "Sending %d bytes to storage server %s:%d\n", bytes, ip, port);
-
   msg.type = WRITE;
   sprintf(msg.data, "%d", bytes);
   send_tx(ss_sock, &msg, sizeof(msg), 0);
@@ -288,8 +294,9 @@ send_write:
 
   msg.type = STOP;
   send_tx(ss_sock, &msg, sizeof(msg), 0);
-
-  logc(logfile, COMPLETION, "Sent %d bytes to storage server %s:%d\n", bytes, ip, port);
+  logc(COMPLETION, "Sent %d bytes to storage server %s:%d", bytes, ip, port);
+  
+ret_write:
   fclose_tx(file);
   close_tx(ss_sock);
 }
@@ -326,15 +333,17 @@ void request_create(void)
   {
     case CREATE_DIR + 1:
     case CREATE_FILE + 1:
-      logc(logfile, COMPLETION, "%s was created\n", path); break;
+      logc(COMPLETION, "%s was created", path); break;
     case EXISTS:
-      logc(logfile, FAILURE, "%s already exists\n", path); break;
+      logc(FAILURE, "%s already exists", path); break;
+    case NOTFOUND:
+      logc(FAILURE, "Parent directory of %s was not found", path); break;
     case PERM:
-      logc(logfile, FAILURE, "Missing permissions for create\n"); break;
+      logc(FAILURE, "Missing permissions for create"); break;
     case UNAVAILABLE:
-      logc(logfile, FAILURE, "The server was unavailable.\n"); break;
+      logc(FAILURE, "The server was unavailable"); break;
     default:
-      invalid_response(msg.type);
+      logc(FAILURE, "Received an invalid response %d from the server", msg.type);
   }
 }
 
@@ -355,21 +364,21 @@ void request_delete(void)
   switch (msg.type)
   {
     case DELETE + 1:
-      logc(logfile, COMPLETION, "%s was deleted\n", path); break;
+      logc(COMPLETION, "%s was deleted", path); break;
     case NOTFOUND:
-      logc(logfile, FAILURE, "%s was not found\n", path); break;
+      logc(FAILURE, "%s was not found", path); break;
     case UNAVAILABLE:
-      logc(logfile, FAILURE, "%s is unavailable currently\n", path); return;
+      logc(FAILURE, "%s is unavailable currently", path); break;
     case BEING_READ:
-      logc(logfile, FAILURE, "%s is being read currently\n", path); return;
+      logc(FAILURE, "%s is being read currently", path); break;
     case RDONLY:
-      logc(logfile, FAILURE, "%s has been marked read-only\n", path); break;
+      logc(FAILURE, "%s has been marked read-only", path); break;
     case XLOCK:
-      logc(logfile, FAILURE, "%s is being written to by a client\n", path); return;
+      logc(FAILURE, "%s is being written to by a client", path); break;
     case PERM:
-      logc(logfile, FAILURE, "Missing permissions for delete\n"); break;
+      logc(FAILURE, "Missing permissions for delete"); break;
     default:
-      invalid_response(msg.type);
+      logc(FAILURE, "Received an invalid response %d from the server", msg.type);
   }
 }
 
@@ -394,14 +403,14 @@ void request_info(void)
   {
     case INFO + 1:
       bytes = atoi(msg.data);
-      logc(logfile, PROGRESS, "Receiving %d bytes from naming server\n", bytes);
+      logc(PROGRESS, "Receiving %d bytes from naming server", bytes);
       goto recv_info;
     case NOTFOUND:
-      logc(logfile, FAILURE, "%s was not found\n", path); return;
+      logc(FAILURE, "%s was not found", path); return;
     case PERM:
-      logc(logfile, FAILURE, "Missing permissions for info\n"); return;
+      logc(FAILURE, "Missing permissions for info"); return;
     default:
-      invalid_response(msg.type); return;
+      logc(FAILURE, "Received an invalid response %d from the server", msg.type); return;
   }
 
 recv_info:
@@ -415,8 +424,8 @@ recv_info:
     switch (msg.type)
     {
       case STOP:
-        logc(logfile, COMPLETION, "Received %d bytes from naming server\n", bytes);
-        goto ret_info;
+        logc(COMPLETION, "Received %d bytes from naming server", bytes);
+        goto print_info;
 
       case INFO + 1:
         if (end >= ptr + BUFSIZE) {
@@ -431,16 +440,18 @@ recv_info:
         }
 
       default:
-        invalid_response(msg.type); return;
+        logc(FAILURE, "Received an invalid response %d from the server", msg.type);
+        goto ret_info;
     }
   }
 
-ret_info:
+print_info:
   char perms[11], mtime_str[80];
   get_permissions(perms, info->mode);
   strftime(mtime_str, sizeof(mtime_str), "%b %d %H:%M", localtime(&(info->mtime)));
   printf("%s %zu %s\n", perms, info->size, mtime_str);
 
+ret_info:
   free(info);
 }
 
@@ -459,10 +470,10 @@ void request_list(void)
   {
     case LIST + 1:
       bytes = atoi(msg.data);
-      logc(logfile, PROGRESS, "Receiving %d bytes from naming server\n", bytes);
+      logc(PROGRESS, "Receiving %d bytes from naming server", bytes);
       goto recv_list;
     default:
-      invalid_response(msg.type); return;
+      logc(FAILURE, "Received an invalid response %d from the server", msg.type); return;
   }
 
 recv_list:
@@ -476,8 +487,8 @@ recv_list:
     switch (msg.type)
     {
       case STOP:
-        logc(logfile, COMPLETION, "Received %d bytes from naming server\n", bytes);
-        goto ret_list;
+        logc(COMPLETION, "Received %d bytes from naming server", bytes);
+        goto print_list;
 
       case LIST + 1:
         if (end >= ptr + BUFSIZE) {
@@ -492,11 +503,12 @@ recv_list:
         }
 
       default:
-        invalid_response(msg.type); return;
+        logc(FAILURE, "Received an invalid response %d from the server", msg.type);
+        goto ret_list;
     }
   }
 
-ret_list:
+print_list:
   metadata_t* file = (metadata_t*) info;
   while (end > (void*) file) {
     if (S_ISDIR(file->mode))
@@ -506,6 +518,7 @@ ret_list:
     file++;
   }
   
+ret_list:
   free(info);
 }
 
@@ -532,17 +545,17 @@ void request_copy(void)
   switch (msg.type)
   {
     case COPY + 1:
-      logc(logfile, COMPLETION, "%s was copied to %s\n", curpath, newpath); return;
+      logc(COMPLETION, "%s was copied to %s", curpath, newpath); break;
     case NOTFOUND:
-      logc(logfile, FAILURE, "%s was not found\n", curpath); return;
+      logc(FAILURE, "%s was not found", curpath); break;
     case UNAVAILABLE:
-      logc(logfile, FAILURE, "%s is unavailable currently\n", curpath); return;
+      logc(FAILURE, "%s is unavailable currently", curpath); break;
     case XLOCK:
-      logc(logfile, FAILURE, "%s is being written to by a client\n", curpath); return;
+      logc(FAILURE, "%s is being written to by a client", curpath); break;
     case PERM:
-      logc(logfile, FAILURE, "Missing permissions for copy\n"); return;
+      logc(FAILURE, "Missing permissions for copy"); break;
     default:
-      invalid_response(msg.type); return;
+      logc(FAILURE, "Received an invalid response %d from the server", msg.type); break;
   }
 }
 
@@ -553,9 +566,4 @@ void request_invalid(void)
 
   send_tx(sock, &msg, sizeof(msg), 0);
   recv_tx(sock, &msg, sizeof(msg), 0);
-}
-
-void invalid_response(int resp)
-{
-  logc(logfile, FAILURE, "Received an invalid response %d from the server\n", resp);
 }

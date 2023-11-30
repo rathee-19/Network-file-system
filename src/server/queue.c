@@ -5,7 +5,7 @@ void queue_init(queue_t* Q)
 {
   Q->head = (qnode_t*) calloc(1, sizeof(qnode_t));
   Q->tail = Q->head;
-  pthread_mutex_init(&Q->lock, NULL);
+  pthread_mutex_init_tx(&Q->lock, NULL);
 }
 
 void queue_insert(queue_t*  Q, fnode_t* fn)

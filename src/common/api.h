@@ -35,7 +35,7 @@
 #define UNAVAILABLE -8
 
 #define BUFSIZE 4096             // assumption: greater than PATH_MAX, 4096
-#define RETRY_DIFF 1                  // seconds
+#define RETRY_DIFF 5             // seconds
 
 #define COPY_COND 100            // set to indicate user defined operation
 #define BACKUP_COND 101          // set to indicate naming server defined backup operation
@@ -47,9 +47,11 @@ typedef struct __message {
 
 typedef struct __request {
   int sock;
+  int newsock;
   struct sockaddr_in addr;
-  socklen_t addr_size;
+  socklen_t addrlen;
   message_t msg;
+  void* allocptr;
 } request_t;
 
 typedef struct __metadata {
