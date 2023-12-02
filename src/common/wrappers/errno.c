@@ -7,13 +7,13 @@ extern logfile_t* logfile;
 
 void perror_t(const char* s)
 {
-  pthread_mutex_lock(&(logfile->lock));
+  pthread_mutex_lock_tx(&(logfile->lock));
   timestamp(stderr);
   fprintf(stderr, RED);
   perror(s);
   fprintf(stderr, RESET);
   fflush(stderr);
-  pthread_mutex_unlock(&(logfile->lock));
+  pthread_mutex_unlock_tx(&(logfile->lock));
 }
 
 void perror_tx(const char* s)

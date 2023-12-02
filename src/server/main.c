@@ -48,7 +48,7 @@ int main(int argc, char* argv[])
   addr.sin_addr.s_addr = inet_addr_tx(NSIP);
 
   bind_t(sock, (struct sockaddr*) &addr, sizeof(addr));
-  listen_tx(sock, 50);                                          // TODO: IMP: how much backlog can we tolerate??
+  listen_tx(sock, 64);
 
   while (1)
   {

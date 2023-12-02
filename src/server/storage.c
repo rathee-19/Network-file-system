@@ -176,7 +176,7 @@ void* handle_read(void* arg)
     logns(FAILURE, "Returning read request from %s:%d, for directory %s", ip, port, msg.data);
   }
   else {
-    pthread_mutex_lock(&(file->lock));
+    pthread_mutex_lock_tx(&(file->lock));
     if (file->wr > 0) {
       msg.type = XLOCK;
       logns(FAILURE, "Returning read request from %s:%d, due to %s being locked", ip, port, msg.data);
@@ -209,7 +209,7 @@ void* handle_read(void* arg)
       msg.type = UNAVAILABLE;
       logns(FAILURE, "Returning read request from %s:%d, due to %s being unavailable", ip, port, msg.data);
     }
-    pthread_mutex_unlock(&(file->lock));
+    pthread_mutex_unlock_tx(&(file->lock));
   }
 
   send_tpx(req, sock, &msg, sizeof(msg), 0);
@@ -236,9 +236,9 @@ void* handle_read_completion(void* arg)
   }
 
   if (file != 0) {
-    pthread_mutex_lock(&(file->lock));
+    pthread_mutex_lock_tx(&(file->lock));
     file->rd--;
-    pthread_mutex_unlock(&(file->lock));
+    pthread_mutex_unlock_tx(&(file->lock));
   }
 
   reqfree(req);
@@ -272,7 +272,7 @@ void* handle_write(void* arg)
     logns(FAILURE, "Returning read request from %s:%d, for directory %s", ip, port, msg.data);
   }
   else {
-    pthread_mutex_lock(&(file->lock));
+    pthread_mutex_lock_tx(&(file->lock));
     if (file->rd > 0) {
       msg.type = BEING_READ;
       logns(FAILURE, "Returning write request from %s:%d, due to %s being read", ip, port, msg.data);
@@ -309,7 +309,7 @@ void* handle_write(void* arg)
       msg.type = UNAVAILABLE;
       logns(FAILURE, "Returning write request from %s:%d, due to %s being unavailable", ip, port, msg.data);
     }
-    pthread_mutex_unlock(&(file->lock));
+    pthread_mutex_unlock_tx(&(file->lock));
   }
 
   send_tpx(req, sock, &msg, sizeof(msg), 0);
@@ -337,9 +337,9 @@ void* handle_write_completion(void* arg)
   }
 
   if (file != 0) {
-    pthread_mutex_lock(&(file->lock));
+    pthread_mutex_lock_tx(&(file->lock));
     file->wr--;
-    pthread_mutex_unlock(&(file->lock));
+    pthread_mutex_unlock_tx(&(file->lock));
   }
 
   int bytes;

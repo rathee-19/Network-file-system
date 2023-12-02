@@ -50,9 +50,9 @@ int connect_t(int sockfd, const struct sockaddr* addr, socklen_t addrlen)
 {
   while (connect(sockfd, addr, addrlen) < 0) {
     perror_t("connect");
-    pthread_mutex_lock(&(logfile->lock));
+    pthread_mutex_lock_tx(&(logfile->lock));
     fprintf_t(stderr, RED "connect: retrying after %d seconds..." RESET "\n", RETRY_DIFF);
-    pthread_mutex_unlock(&(logfile->lock));
+    pthread_mutex_unlock_tx(&(logfile->lock));
     sleep(RETRY_DIFF);
   }
   return 0;
@@ -60,15 +60,15 @@ int connect_t(int sockfd, const struct sockaddr* addr, socklen_t addrlen)
 
 int connect_tb(int sockfd, const struct sockaddr* addr, socklen_t addrlen, int timeout)
 {
-  while ((timeout >= 0) && (connect(sockfd, addr, addrlen) < 0)) {
+  while ((timeout > 0) && (connect(sockfd, addr, addrlen) < 0)) {
     perror_t("connect");
-    pthread_mutex_lock(&(logfile->lock));
+    pthread_mutex_lock_tx(&(logfile->lock));
     fprintf_t(stderr, RED "connect: retrying after %d seconds..." RESET "\n", RETRY_DIFF);
-    pthread_mutex_unlock(&(logfile->lock));
+    pthread_mutex_unlock_tx(&(logfile->lock));
     sleep(RETRY_DIFF);
     timeout -= RETRY_DIFF;
   }
-  if (timeout >= 0)
+  if (timeout > 0)
     return 0;
   else
     return 1;
@@ -78,9 +78,9 @@ int bind_t(int sockfd, const struct sockaddr* addr, socklen_t addrlen)
 {
   while (bind(sockfd, addr, addrlen) < 0) {
     perror_t("bind");
-    pthread_mutex_lock(&(logfile->lock));
+    pthread_mutex_lock_tx(&(logfile->lock));
     fprintf_t(stderr, RED "bind: retrying after %d seconds..." RESET "\n", RETRY_DIFF);
-    pthread_mutex_unlock(&(logfile->lock));
+    pthread_mutex_unlock_tx(&(logfile->lock));
     sleep(RETRY_DIFF);
   };
   return 0;

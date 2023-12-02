@@ -36,13 +36,6 @@ fnode_t* trie_search(trie_t* T, char* path);
 metadata_t* preorder_traversal(trie_t* T, int* bytes);
 void preorder_worker(fnode_t* head, metadata_t* data, int* idx);
 
-fnode_t* check_ghost_files(trie_t* T);
-fnode_t* check_ghost_worker(fnode_t* head);
-fnode_t* check_vulnerable_files(trie_t* T);
-fnode_t* check_vulnerable_worker(fnode_t* head);
-void trie_prune(trie_t* T);
-int trie_prune_worker(trie_t* T, fnode_t* head);
-
 void invalidate_file(trie_t* T, fnode_t *node);
 void invalidate_dir(trie_t* T, fnode_t *node);
 void invalidate_worker(trie_t* T, fnode_t *head);
@@ -50,5 +43,14 @@ void mark_rdonly(trie_t* T, snode_t* loc);
 void mark_rdonly_worker(fnode_t* head, snode_t* loc);
 void unmark_rdonly(trie_t* T, snode_t* loc);
 void unmark_rdonly_worker(fnode_t* head, snode_t* loc);
+
+/*
+fnode_t* check_ghost_files(trie_t* T);
+fnode_t* check_ghost_worker(fnode_t* head);
+fnode_t* check_vulnerable_files(trie_t* T);
+fnode_t* check_vulnerable_worker(fnode_t* head);
+void trie_prune(trie_t* T);
+int trie_prune_worker(trie_t* T, fnode_t* head);
+*/
 
 #endif

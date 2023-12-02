@@ -17,9 +17,9 @@
 #include "queue.h"
 #include "cache.h"
 
-#define PING_TIMEOUT 2        // ... seconds
+#define PING_TIMEOUT 5        // ... seconds
 #define PING_SLEEP 60         // ... seconds
-#define PING_TOLERANCE 3      // number of consecutives ping misses to be tolerated
+#define PING_TOLERANCE 3      // number of consecutives ping misses tolerated
 #define CRAWL_SLEEP 15        // ... seconds
 
 #define logns(level, ...) logevent(SERVER, level, __VA_ARGS__)

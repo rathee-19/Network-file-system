@@ -12,7 +12,7 @@ void cache_insert(cache_t* C, fnode_t* node)
 {
   int max = 0;
   
-  pthread_mutex_lock(&(C->lock));
+  pthread_mutex_lock_tx(&(C->lock));
   for (int i = 0; i < CACHE_SIZE; i++) {
     if (C->files[i] == NULL) {
       max = i;
@@ -24,7 +24,7 @@ void cache_insert(cache_t* C, fnode_t* node)
 
   C->files[max] = node;
   C->idle[max] = 0;
-  pthread_mutex_unlock(&(C->lock));
+  pthread_mutex_unlock_tx(&(C->lock));
 }
 
 fnode_t* cache_search(cache_t* C, char* path)
@@ -32,22 +32,22 @@ fnode_t* cache_search(cache_t* C, char* path)
   int i;
   fnode_t* node = NULL;
 
-  pthread_mutex_lock(&(C->lock));
+  pthread_mutex_lock_tx(&(C->lock));
   for (i = 0; i < CACHE_SIZE; i++) {
     if (C->files[i] != NULL) {
       if (strcmp(C->files[i]->file.path, path) == 0) {
         C->idle[i] = 0;
         node = C->files[i];
-        goto end;
+        goto ret_search;
       }
       C->idle[i]++;
     }
   }
 
-end:
+ret_search:
   for (; i < CACHE_SIZE; i++)
     if (C->files[i] != NULL)
       C->idle[i]++;
-  pthread_mutex_unlock(&(C->lock));
+  pthread_mutex_unlock_tx(&(C->lock));
   return node;
 }

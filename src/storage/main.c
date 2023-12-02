@@ -39,6 +39,7 @@ int main(int argc, char *argv[])
     scanf(" %[^\n]s", paths[i]);
   }
 
+  printf("\n");
   nsnotify(nsport, clport, stport, (char*) &paths, n);
 
   return 0;

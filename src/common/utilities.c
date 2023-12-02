@@ -14,7 +14,7 @@ void timestamp(FILE* stream)
 {
   time_t timer;
   char buffer[24];
-  struct tm* tm_info; 
+  struct tm* tm_info;
 
   timer = time(NULL);
   tm_info = localtime(&timer);
@@ -25,7 +25,7 @@ void timestamp(FILE* stream)
 
 void logevent(enum caller c, enum level lvl, const char* message, ...)
 {
-  pthread_mutex_lock(&(logfile->lock));
+  pthread_mutex_lock_tx(&(logfile->lock));
   va_list args;
   va_start(args, message);
 
@@ -63,9 +63,9 @@ void logevent(enum caller c, enum level lvl, const char* message, ...)
     
     case FAILURE:
       timestamp(stderr);
-      fprintf(stdout, RED);
+      fprintf(stderr, RED);
       vfprintf(stderr, message, args);
-      fprintf(stdout, RESET "\n");
+      fprintf(stderr, RESET "\n");
       break;
   }
 
@@ -79,7 +79,7 @@ void logevent(enum caller c, enum level lvl, const char* message, ...)
 #endif
 
   va_end(args);
-  pthread_mutex_unlock(&(logfile->lock));
+  pthread_mutex_unlock_tx(&(logfile->lock));
 }
 
 request_t* reqalloc(void)

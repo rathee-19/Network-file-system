@@ -34,7 +34,6 @@ int countfiles(char* cdir);
 // server.c
 void* nslisten(void* arg);
 void* thread_assignment_ns(void* arg);
-void* handle_backup_send(void* arg);
 void* handle_copy_internal(void* arg);
 void* handle_create_dir(void* arg);
 void* handle_create_file(void* arg);
@@ -45,6 +44,7 @@ void* handle_ping(void* arg);
 void* stlisten(void* arg);
 void* thread_assignment_st(void* arg);
 void* handle_backup_recv(void* arg);
+void* handle_backup_send(void* arg);
 void* handle_copy_recv(void* arg);
 void* handle_copy_send(void* arg);
 void* handle_update_recv(void* arg);

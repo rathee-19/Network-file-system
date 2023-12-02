@@ -291,7 +291,7 @@ void* handle_delete(void* arg)
     logns(COMPLETION, "Sending delete confirmation to %s:%d", ip, port);
   }
   else {
-    pthread_mutex_lock(&(node->lock));
+    pthread_mutex_lock_tx(&(node->lock));
     if (node->rd > 0) {
       msg.type = BEING_READ;
       logns(FAILURE, "Returning write request from %s:%d, due to %s being read", ip, port, msg.data);
@@ -305,7 +305,7 @@ void* handle_delete(void* arg)
       msg.type = DELETE + 1;
       logns(COMPLETION, "Sending delete confirmation to %s:%d", ip, port);
     }
-    pthread_mutex_unlock(&(node->lock));
+    pthread_mutex_unlock_tx(&(node->lock));
   }
   
   send_tpx(req, sock, &msg, sizeof(msg), 0);
@@ -338,9 +338,9 @@ void* handle_info(void* arg)
     logns(FAILURE, "Returning info request from %s:%d, for unknown file %s", ip, port, msg.data);
   }
   else {
-    pthread_mutex_lock(&(node->lock));
+    pthread_mutex_lock_tx(&(node->lock));
     metadata_t info = node->file;
-    pthread_mutex_unlock(&(node->lock));
+    pthread_mutex_unlock_tx(&(node->lock));
     
     msg.type = INFO + 1;
     int bytes = sizeof(metadata_t);

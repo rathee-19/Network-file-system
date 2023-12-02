@@ -17,7 +17,7 @@ void* cllisten(void* arg)
   addr.sin_addr.s_addr = inet_addr_tpx(req, IP);
 
   bind_t(sock, (struct sockaddr*) &addr, sizeof(addr));
-  listen_tpx(req, sock, 50);
+  listen_tpx(req, sock, 64);
 
   while (1)
   {

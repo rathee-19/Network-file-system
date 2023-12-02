@@ -22,13 +22,13 @@ snode_t* list_insert(list_t* L, storage_t st)
   x->st = st;
   x->down = 0;
 
-  pthread_mutex_lock(&L->lock);
+  pthread_mutex_lock_tx(&L->lock);
   L->num++;
   L->head->prev->next = x;
   x->prev = L->head->prev;
   L->head->prev = x;
   x->next = L->head;
-  pthread_mutex_unlock(&L->lock);
+  pthread_mutex_unlock_tx(&L->lock);
 
   return x;
 }
@@ -38,28 +38,28 @@ void list_delete(list_t *L, snode_t* x)
   if (L->head == x)
     return;
 
-  pthread_mutex_lock(&L->lock);
+  pthread_mutex_lock_tx(&L->lock);
   x->prev->next = x->next;
   x->next->prev = x->prev;
-  pthread_mutex_unlock(&L->lock);
+  pthread_mutex_unlock_tx(&L->lock);
 
   free(x);
 }
 
 snode_t* list_search(list_t* L, storage_t st)
 {
-  pthread_mutex_lock(&L->lock);
+  pthread_mutex_lock_tx(&L->lock);
   snode_t* node = L->head->next;
 
   while(node != L->head) {
     if (stequal(node->st, st)) {
-      pthread_mutex_unlock(&L->lock);
+      pthread_mutex_unlock_tx(&L->lock);
       return node;
     }
     node = node->next;
   }
 
-  pthread_mutex_unlock(&L->lock);
+  pthread_mutex_unlock_tx(&L->lock);
   return NULL;
 }
 
