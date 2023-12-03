@@ -17,6 +17,7 @@ request_t* reqalloc(void);
 void reqfree(request_t* req);
 void get_permissions(char* perms, mode_t mode);
 void get_parent_dir(char* dest, char* src);
+int create_dir(char* dir);
 void remove_prefix(char* dest, char* src, char* prefix);
 void add_prefix(char* dest, char* src, char* prefix);
 

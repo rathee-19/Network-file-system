@@ -213,6 +213,18 @@ void unmark_rdonly_worker(fnode_t* head, snode_t* loc)
       unmark_rdonly_worker(head->child[i], loc);
 }
 
+snode_t* available_server(fnode_t* node)
+{
+  snode_t* snode = NULL;
+  if (node->loc && node->loc->down == 0)
+    snode = node->loc;
+  else if (node->bkp1 && node->bkp1->down == 0)
+    snode = node->bkp1;
+  else if (node->bkp2 && node->bkp2->down == 0)
+    snode = node->bkp2;
+  return snode;
+}
+
 /*
 fnode_t* check_ghost_files(trie_t* T)
 {

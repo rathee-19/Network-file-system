@@ -66,13 +66,15 @@ void* filecrawl(void* arg)
 {
   while (1)
   {
+    pthread_t worker;
     fnode_t* file = NULL;
     if ((file = queue_pop(&qdel)) != NULL)
-      request_delete(file);
-    else if ((file = queue_pop(&qrep)) != NULL)
-      request_replicate(file);
+      pthread_create_tx(&worker, NULL, request_delete, file);
+    else if ((storage.num > 2) && ((file = queue_pop(&qrep)) != NULL))
+      pthread_create_tx(&worker, NULL, request_replicate, file);
     else
       sleep(CRAWL_SLEEP);
+    usleep(CRAWL_COOLDOWN);
   }
 
   return NULL;
@@ -283,6 +285,7 @@ void* handle_write(void* arg)
     }
     else if (file->loc && file->loc->down == 0) {
       (file->wr)++;
+      file->writer = file->loc;
       msg.type = WRITE + 1;
       bzero(msg.data, BUFSIZE);
       sprintf(msg.data, "%s", file->loc->st.ip);
@@ -291,6 +294,7 @@ void* handle_write(void* arg)
     }
     else if (file->bkp1 && file->bkp1->down == 0) {
       (file->wr)++;
+      file->writer = file->bkp1;
       msg.type = WRITE + 1;
       bzero(msg.data, BUFSIZE);
       sprintf(msg.data, "%s", file->bkp1->st.ip);
@@ -299,6 +303,7 @@ void* handle_write(void* arg)
     }
     else if (file->bkp2 && file->bkp2->down == 0) {
       (file->wr)++;
+      file->writer = file->bkp2;
       msg.type = WRITE + 1;
       bzero(msg.data, BUFSIZE);
       sprintf(msg.data, "%s", file->bkp2->st.ip);
@@ -334,12 +339,6 @@ void* handle_write_completion(void* arg)
     file = trie_search(&files, msg.data);
     if (file != NULL)
       cache_insert(&cache, file);
-  }
-
-  if (file != 0) {
-    pthread_mutex_lock_tx(&(file->lock));
-    file->wr--;
-    pthread_mutex_unlock_tx(&(file->lock));
   }
 
   int bytes;
@@ -393,6 +392,19 @@ void* handle_write_completion(void* arg)
   }
 
 ret_write_ack:
+  if (file != 0) {
+    if (file->loc && file->loc != file->writer)
+      request_update(req, file->loc, file->writer);
+    if (file->bkp1 && file->bkp1 != file->writer)
+      request_update(req, file->bkp1, file->writer);
+    if (file->bkp2 && file->bkp2 != file->writer)
+      request_update(req, file->bkp2, file->writer);
+
+    pthread_mutex_lock_tx(&(file->lock));
+    file->wr--;
+    pthread_mutex_unlock_tx(&(file->lock));
+  }
+
   reqfree(req);
   return NULL;
 }
@@ -425,7 +437,7 @@ void* handle_copy(void* arg)
   if (curnode == NULL) {
     msg.type = NOTFOUND;
     logns(FAILURE, "Returning copy request from %s:%d, for unknown file %s", ip, port, curpath);
-    goto respond_copy;
+    goto ret_copy;
   }
 
   char parent[PATH_MAX];
@@ -441,7 +453,7 @@ void* handle_copy(void* arg)
   if (newnode == NULL) {
     msg.type = NOTFOUND;
     logns(FAILURE, "Returning copy request from %s:%d, to unknown parent directory %s", ip, port, parent);
-    goto respond_copy;
+    goto ret_copy;
   }
 
   snode_t* sender = available_server(curnode);
@@ -449,7 +461,7 @@ void* handle_copy(void* arg)
 
   if (sender == NULL || receiver == NULL) {
     msg.type = UNAVAILABLE;
-    goto respond_copy;
+    goto ret_copy;
   }
 
   char ss_ip[INET_ADDRSTRLEN];
@@ -512,14 +524,16 @@ void* handle_copy(void* arg)
   }
   close_tpx(req, ss_sock);
 
-respond_copy:
+ret_copy:
   send_tpx(req, sock, &msg, sizeof(msg), 0);
   reqfree(req);
   return NULL;
 }
 
-void request_delete(fnode_t* node)
+void* request_delete(void* arg)
 {
+  fnode_t* node = (fnode_t*) arg;
+
   if (node->loc) {
     request_delete_worker(node, node->loc);
     node->loc = 0;
@@ -534,6 +548,8 @@ void request_delete(fnode_t* node)
     request_delete_worker(node, node->bkp2);
     node->bkp2 = 0;
   }
+
+  return NULL;
 }
 
 void request_delete_worker(fnode_t* node, snode_t* snode)
@@ -569,19 +585,119 @@ void request_delete_worker(fnode_t* node, snode_t* snode)
   reqfree(req);
 }
 
-void request_replicate(fnode_t* node)
+void* request_replicate(void* arg)
 {
-  
+  fnode_t* node = (fnode_t*) arg;
+  request_t* req = reqalloc();
+
+  int succ;
+  int fail;
+  message_t msg;
+  snode_t* snode;
+
+  char ip[INET_ADDRSTRLEN];
+  sprintf(ip, "%s", node->loc->st.ip);
+  int port = node->loc->st.nsport;
+
+  struct sockaddr_in addr;
+  memset(&addr, '\0', sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  addr.sin_addr.s_addr = inet_addr_tpx(req, ip);
+
+  for (succ = 0, fail = 0; succ < 2 && fail < REPLICATE_TOLERANCE; succ++)
+  {
+    snode = list_random(&storage);
+    while (snode == NULL || snode == node->loc || (succ && (snode == node->bkp1)))
+      snode = list_random(&storage);
+
+    req->sock = socket_tpx(req, AF_INET, SOCK_STREAM, 0);
+    connect_t(req->sock, (struct sockaddr*) &addr, sizeof(addr));
+
+    logns(PROGRESS, "Sending replicate request to %s:%d, for %s", ip, port, node->file.path);
+    msg.type = BACKUP;
+    strcpy(msg.data, node->file.path);
+    send_tpx(req, req->sock, &msg, sizeof(msg), 0);
+    sprintf(msg.data, "%s", snode->st.ip);
+    sprintf(msg.data + 32, "%d", snode->st.stport);
+    send_tpx(req, req->sock, &msg, sizeof(msg), 0);
+    logns(PROGRESS, "Sent replicate request to %s:%d, for %s", ip, port, node->file.path);
+
+    recv_tpx(req, req->sock, &msg, sizeof(msg), 0);
+
+    switch (msg.type)
+    {
+      case BACKUP + 1:
+        logns(COMPLETION, "Received replication acknowledgment from %s:%d, for %s", ip, port, node->file.path);
+        if (succ == 0)
+          node->bkp1 = snode;
+        else
+          node->bkp2 = snode;
+        break;
+
+      default:
+        logns(FAILURE, "Failed to receive replication acknowledgment from %s:%d, for %s", ip, port, node->file.path);
+        fail++;
+        succ--;
+    }
+
+    close_tpx(req, req->sock);
+  }
+
+  switch (succ)
+  {
+    case 0:
+      logns(FAILURE, "Failed to replicate the file %s completely", node->file.path); break;
+    case 1:
+      logns(FAILURE, "Failed to replicate the file %s partially", node->file.path); break;
+    default:
+      logns(COMPLETION, "Finished replicating %s", node->file.path);
+  }
+
+  reqfree(req);
+  return NULL;
 }
 
-snode_t* available_server(fnode_t* node)
+void request_update(request_t* req, snode_t* dest, snode_t* src)
 {
-  snode_t* snode = NULL;
-  if (node->loc && node->loc->down == 0)
-    snode = node->loc;
-  else if (node->bkp1 && node->bkp1->down == 0)
-    snode = node->bkp1;
-  else if (node->bkp2 && node->bkp2->down == 0)
-    snode = node->bkp2;
-  return snode;
+  message_t msg = req->msg;
+  char path[PATH_MAX];
+  char src_ip[INET_ADDRSTRLEN];
+  char dest_ip[INET_ADDRSTRLEN];
+  int src_port = src->st.nsport;
+  int dest_port = dest->st.stport;
+
+  strcpy(path, msg.data);
+  sprintf(src_ip, "%s", src->st.ip);
+  sprintf(dest_ip, "%s", dest->st.ip);
+
+  struct sockaddr_in addr;
+  memset(&addr, '\0', sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(src_port);
+  addr.sin_addr.s_addr = inet_addr_tpx(req, src_ip);
+
+  int ss_sock = socket_tpx(req, AF_INET, SOCK_STREAM, 0);
+  req->newsock = ss_sock;
+  connect_t(ss_sock, (struct sockaddr*) &addr, sizeof(addr));
+  
+  msg.type = UPDATE;
+  send_tpx(req, ss_sock, &msg, sizeof(msg), 0);
+  
+  sprintf(msg.data, "%s", dest_ip);
+  sprintf(msg.data + 32, "%d", dest_port);
+  send_tpx(req, ss_sock, &msg, sizeof(msg), 0);
+  logns(PROGRESS, "Sent update request to %s:%d, for %s, at %s:%d", src_ip, src_port, path, dest_ip, dest_port);
+  
+  recv_tpx(req, ss_sock, &msg, sizeof(msg), 0);
+
+  switch (msg.type)
+  {
+    case UPDATE + 1:
+      logns(COMPLETION, "Received update acknowledgment from %s:%d, for %s, at %s:%d", src_ip, src_port, path, dest_ip, dest_port);
+      break;
+
+    default:
+      logns(FAILURE, "Failed to receive update acknowledgment from %s:%d, for %s, at %s:%d", src_ip, src_port, path, dest_ip, dest_port);
+  }
 }

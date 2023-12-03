@@ -1,6 +1,6 @@
 # Network File System
 
-## Some details
+## Some pointers
 
 1. The program makes use of wrapper functions extensively, for a variety of reasons as listed below, to streamline the code of operational segments.
 
@@ -8,6 +8,8 @@
     - Retrying error prone functions, with a bound on attempts (function_b).
     - Dealing with errors but with an exit (function_x).
     - Dealing with errors but with a thread-specific shutdown hook (function_p, as in pthread).
+
+2. There is no way the naming server can differentiate between the clients and storage servers yet, except for the kind of messages they send ofcourse. The easiest thing that can be done is to open two ports for each, but I am not sure how far that would go.
 
 ## Steps to run
 

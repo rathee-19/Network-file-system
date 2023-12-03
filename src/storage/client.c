@@ -17,7 +17,7 @@ void* cllisten(void* arg)
   addr.sin_addr.s_addr = inet_addr_tpx(req, IP);
 
   bind_t(sock, (struct sockaddr*) &addr, sizeof(addr));
-  listen_tpx(req, sock, 64);
+  listen_tpx(req, sock, 128);
 
   while (1)
   {
@@ -77,7 +77,7 @@ void* handle_read(void* arg)
   char path[BUFSIZE];
   strcpy(path, msg.data);
   if (access(path, F_OK) != 0)
-    add_prefix(path, ".backup/", msg.data);
+    add_prefix(path, msg.data, ".backup/");
 
   FILE *file = fopen_tpx(req, path, "r");
   struct stat st;
@@ -150,7 +150,7 @@ void* handle_write(void* arg)
   char path[BUFSIZE];
   strcpy(path, msg.data);
   if (access(path, F_OK) != 0)
-    add_prefix(path, ".backup/", msg.data);
+    add_prefix(path, msg.data, ".backup/");
     
   FILE *file = fopen_tpx(req, path, "w+");
   

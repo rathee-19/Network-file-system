@@ -17,7 +17,7 @@ void* nslisten(void* arg)
   addr.sin_addr.s_addr = inet_addr_tpx(req, IP);
 
   bind_t(sock, (struct sockaddr*) &addr, sizeof(addr));
-  listen_tpx(req, sock, 64);
+  listen_tpx(req, sock, 128);
 
   while (1)
   {
@@ -277,7 +277,11 @@ void* handle_delete(void* arg)
   message_t msg = req->msg;
   int sock = req->sock;
 
-  remove(msg.data);
+  if (remove(msg.data) < 0) {
+    char path[PATH_MAX];
+    add_prefix(path, msg.data, ".backup/");
+    remove(path);
+  }
   msg.type = DELETE + 1;
   send_tpx(req, sock, &msg, sizeof(msg), 0);
 

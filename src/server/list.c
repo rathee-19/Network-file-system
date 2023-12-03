@@ -10,6 +10,7 @@ void list_init(list_t* L)
   L->head->st.stport = -1;
   L->head->prev = L->head;
   L->head->next = L->head;
+  L->last = L->head;
   pthread_mutex_init_tx(&L->lock, NULL);
 }
 
@@ -61,6 +62,42 @@ snode_t* list_search(list_t* L, storage_t st)
 
   pthread_mutex_unlock_tx(&L->lock);
   return NULL;
+}
+
+snode_t* list_random(list_t* L)
+{
+  snode_t* node = L->last->next;
+  while (node != L->last) {
+    if (node == L->head)
+      node = node->next;
+    else {
+      L->last = node;
+      return node;
+    }
+  }
+  logns(FAILURE, "list_random: reached the end of list");
+  return NULL;
+
+  /*
+  int i;
+  int hops;
+  snode_t* node;
+
+  srand(time(NULL));
+  hops = rand() % L->num;
+
+  i = 0;
+  node = L->head->next;
+  while (node != L->head) {
+    if (i == hops)
+      return node;
+    i++;
+    node = node->next;
+  }
+
+  logns(FAILURE, "list_random: reached the end of list");
+  return NULL;
+  */
 }
 
 int stequal(storage_t a, storage_t b)

@@ -15,6 +15,7 @@ typedef struct __fnode {
   snode_t* loc;
   snode_t* bkp1;
   snode_t* bkp2;
+  snode_t* writer;
   int valid;
   int rd;
   int wr;
@@ -43,6 +44,8 @@ void mark_rdonly(trie_t* T, snode_t* loc);
 void mark_rdonly_worker(fnode_t* head, snode_t* loc);
 void unmark_rdonly(trie_t* T, snode_t* loc);
 void unmark_rdonly_worker(fnode_t* head, snode_t* loc);
+
+snode_t* available_server(fnode_t* node);
 
 /*
 fnode_t* check_ghost_files(trie_t* T);

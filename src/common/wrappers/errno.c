@@ -1,5 +1,7 @@
 #include <errno.h>
 #include <stdlib.h>
+// #include <unistd.h>
+// #include <sys/syscall.h>
 #include "../colors.h"
 #include "../utilities.h"
 
@@ -10,6 +12,7 @@ void perror_t(const char* s)
   pthread_mutex_lock_tx(&(logfile->lock));
   timestamp(stderr);
   fprintf(stderr, RED);
+  // fprintf(stderr, "[%ld] ", syscall(SYS_gettid));
   perror(s);
   fprintf(stderr, RESET);
   fflush(stderr);

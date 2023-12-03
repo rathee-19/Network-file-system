@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <stdarg.h>
 #include <string.h>
+// #include <sys/syscall.h>
 #include "api.h"
 #include "colors.h"
 #include "utilities.h"
@@ -34,6 +35,7 @@ void logevent(enum caller c, enum level lvl, const char* message, ...)
     case STATUS:
       timestamp(stdout);
       fprintf(stdout, ORANGE);
+      // fprintf(stdout, "[%ld] ", syscall(SYS_gettid));
       vfprintf(stdout, message, args);
       fprintf(stdout, RESET "\n");
       break;
@@ -41,6 +43,7 @@ void logevent(enum caller c, enum level lvl, const char* message, ...)
     case EVENT:
       timestamp(stdout);
       fprintf(stdout, CYAN);
+      // fprintf(stdout, "[%ld] ", syscall(SYS_gettid));
       vfprintf(stdout, message, args);
       fprintf(stdout, RESET "\n");
       break;
@@ -49,6 +52,7 @@ void logevent(enum caller c, enum level lvl, const char* message, ...)
 #ifdef DEBUG
       timestamp(stdout);
       fprintf(stdout, MAGENTA);
+      // fprintf(stdout, "[%ld] ", syscall(SYS_gettid));
       vfprintf(stdout, message, args);
       fprintf(stdout, RESET "\n");
 #endif
@@ -57,6 +61,7 @@ void logevent(enum caller c, enum level lvl, const char* message, ...)
     case COMPLETION:
       timestamp(stdout);
       fprintf(stdout, GREEN);
+      // fprintf(stdout, "[%ld] ", syscall(SYS_gettid));
       vfprintf(stdout, message, args);
       fprintf(stdout, RESET "\n");
       break;
@@ -64,6 +69,7 @@ void logevent(enum caller c, enum level lvl, const char* message, ...)
     case FAILURE:
       timestamp(stderr);
       fprintf(stderr, RED);
+      // fprintf(stderr, "[%ld] ", syscall(SYS_gettid));
       vfprintf(stderr, message, args);
       fprintf(stderr, RESET "\n");
       break;
@@ -124,11 +130,46 @@ void get_parent_dir(char* dest, char* src)
   *dest = 0;
   strcpy(dest, src);
 
-  for (int i = strlen(dest) - 1; i >= 0; i--)
+  for (int i = strlen(dest) - 1; i >= 0; i--) {
     if (dest[i] == '/') {
       dest[i] = 0;
-      break;
+      return;
     }
+  }
+
+  dest[0] = 0;
+}
+
+int create_dir(char* path)
+{
+  struct stat st;
+  char parent[PATH_MAX];
+  get_parent_dir(parent, path);
+
+  if (parent[0] == 0) {
+    if (mkdir(path, 0777) == 0)
+      return 0;
+    else
+      return -1;
+  }
+
+  if (stat(parent, &st) < 0) {
+    if (create_dir(parent) == 0) {
+      if (mkdir(path, 0777) == 0)
+        return 0;
+      else
+        return -1;
+    }
+    return -1;
+  }
+  else if (S_ISDIR(st.st_mode)) {
+    if (mkdir(path, 0777) == 0)
+      return 0;
+    else
+      return -1;
+  }
+  else
+    return -1;
 }
 
 void remove_prefix(char* dest, char* src, char* prefix)
@@ -147,6 +188,5 @@ void add_prefix(char* dest, char* src, char* prefix)
 {
   *dest = 0;
   strcat(dest, prefix);
-  strcat(dest, "/");
   strcat(dest, src);
 }

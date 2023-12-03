@@ -89,16 +89,10 @@ metadata_t** dirinfo(char* paths, int n, int* bytes)
 
 void popdirinfo(char* cdir, metadata_t** data, int* idx)
 {
-  DIR *dir = opendir(cdir);
-  if (dir == NULL) {
-    perror_t("opendir");
-    return;
-  }
-  
   metadata_t* info;
-  struct dirent *entry = readdir(dir);
-  char pathbuf[PATH_MAX];
   struct stat statbuf;
+  struct dirent *entry;
+  char pathbuf[PATH_MAX];
 
   if (stat(cdir, &statbuf) == -1) {
     perror_t("stat");
@@ -112,6 +106,12 @@ void popdirinfo(char* cdir, metadata_t** data, int* idx)
   info->ctime = statbuf.st_ctime;
   info->mtime = statbuf.st_mtime;
   (*idx)++;
+
+  DIR *dir = opendir(cdir);
+  if (dir == NULL)
+    return;
+  
+  entry = readdir(dir);
 
   while (entry != NULL)
   {
@@ -149,10 +149,8 @@ int countfiles(char* cdir)
 {
   int ctr = 0;
   DIR *dir = opendir(cdir);
-  if (dir == NULL) {
-    perror_t("opendir");
-    return 0;
-  }
+  if (dir == NULL)
+    return 1;
   
   struct dirent *entry = readdir(dir);
   char pathbuf[PATH_MAX];
