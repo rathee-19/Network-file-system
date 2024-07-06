@@ -1,48 +1,207 @@
-# Network File System
+# Network File System (NFS) Project
 
-## Some pointers
+Welcome to the Network File System (NFS) project! This project focuses on implementing a network-based file system inspired by NFS. The primary objective is to understand concurrency and networking concepts and apply them to build a moderately complex system.
 
-1. The program makes use of wrapper functions extensively, for a variety of reasons as listed below, to streamline the code of operational segments.
+## Key Features
 
-    - Retrying error prone functions indefinitely, with a timestamp (function_t).
-    - Retrying error prone functions, with a bound on attempts (function_b).
-    - Dealing with errors but with an exit (function_x).
-    - Dealing with errors but with a thread-specific shutdown hook (function_p, as in pthread).
+- **Concurrency Management**: Efficient handling of multiple client requests simultaneously.
+- **Network Communication**: Seamless data transfer between clients and servers over the network.
+- **Scalability**: Easily adaptable to handle increasing data and client requests.
+- **Fault Tolerance**: Ensures data consistency and availability even in case of errors or failures.
 
-2. There is no way the naming server can differentiate between the clients and storage servers yet, except for the kind of messages they send ofcourse. The easiest thing that can be done is to open two ports for each, but I am not sure how far that would go.
+## Project Structure
 
-## Steps to run
+Here's the structure of the project:
 
-1. Run in default mode.
+```css
+cssCopy code
+.
+├── input
+│   ├── input1
+│   ├── input2
+│   ├── input3
+│   ├── input4
+│   ├── input5
+│   ├── input6
+│   ├── input7
+│   ├── input8
+│   └── input9
+├── LICENSE
+├── makefile
+├── README.md
+└── src
+    ├── client
+    │   ├── defs.h
+    │   └── main.c
+    ├── common
+    │   ├── api.h
+    │   ├── colors.h
+    │   ├── utilities.c
+    │   ├── utilities.h
+    │   └── wrappers
+    │       ├── errno.c
+    │       ├── inet.c
+    │       ├── pthread.c
+    │       ├── signal.c
+    │       ├── socket.c
+    │       ├── stdio.c
+    │       └── unistd.c
+    ├── server
+    │   ├── cache.c
+    │   ├── cache.h
+    │   ├── client.c
+    │   ├── defs.h
+    │   ├── list.c
+    │   ├── list.h
+    │   ├── main.c
+    │   ├── queue.c
+    │   ├── queue.h
+    │   ├── storage.c
+    │   ├── trie.c
+    │   └── trie.h
+    └── storage
+        ├── client.c
+        ├── defs.h
+        ├── main.c
+        ├── notify.c
+        ├── server.c
+        └── storage.c
 
-```sh
+```
+
+## Running the Code
+
+To run the code, follow these steps in different terminals:
+
+### Naming Server
+
+```bash
+bashCopy code
+make naming_server
+./naming_server
+
+```
+
+### Storage Server
+
+1. Compile the storage server:
+    
+    ```bash
+    bashCopy code
+    make storage_server
+    
+    ```
+    
+2. Place the executable in the desired directory and run:
+    
+    ```bash
+    bashCopy code
+    ./storage_server
+    
+    ```
+    
+3. Enter the paths to be accessible to the client and the naming server's IP address in the terminal. The storage server will be ready to accept requests.
+
+### Client
+
+1. Compile the client:
+    
+    ```bash
+    bashCopy code
+    make client
+    
+    ```
+    
+2. Run the client and enter the naming server's IP address. You can now access files stored on the storage servers through the naming server.
+
+### Finding the IP Address
+
+To find the IP address of the naming server, run:
+
+```bash
+bashCopy code
+hostname -I
+
+```
+
+## File Descriptions
+
+### Naming Server
+
+- `main.c`: Entry point for the naming server.
+- `server_setup.h`: Functions for setting up the server, sending, and receiving messages.
+- `hashmap.h`: Implements hashing for storing file paths and storage server details.
+- `LRUCaching.h`: Implements the LRU caching algorithm.
+- `client_handler.h`: Handles client connection requests.
+- `SS_handler.h`: Handles storage server connection requests.
+- `operation_handler.h`: Contains APIs for client and storage server operations.
+- `utils.h`: Logging, macros, global variables, and utility functions.
+
+### Storage Server
+
+- `main.c`: Entry point for the storage server.
+- `server_setup.h`: Functions for setting up the server, sending, and receiving messages.
+- `get_accessible_paths.h`: Gets paths from the user and sends them to the naming server.
+- `client_handler.h`: Handles client and naming server connection requests.
+- `operation_handler.h`: Contains in-server operations and APIs.
+- `utils.h`: Macros and global variables.
+
+### Client
+
+- `main.c`: Entry point for the client.
+- `server_setup.h`: Functions for setting up the server, sending, and receiving messages.
+- `operation_handler.h`: Contains APIs for client operations.
+- `utils.h`: Macros and global variables.
+
+## Usage Modes
+
+### Default Mode
+
+```bash
+bashCopy code
 make
 ./server
 ./storage <nsport> <clport> <stport>
 ./client
+
 ```
 
-2. Run in debug mode.
+### Debug Mode
 
-```sh
+```bash
+bashCopy code
 make debug
-...
+./server
+./storage <nsport> <clport> <stport>
+./client
+
 ```
 
-3. Run in logging mode.
+### Logging Mode
 
-```sh
+```bash
+bashCopy code
 make log
 ./server <logfile>
 ./storage <nsport> <clport> <stport> <logfile>
 ./client <logfile>
+
 ```
 
-4. Run in both logging and debug mode.
+### Debug and Logging Mode
 
-```sh
+```bash
+bashCopy code
 make ldebug
-...
+./server <logfile>
+./storage <nsport> <clport> <stport> <logfile>
+./client <logfile>
+
 ```
 
-Note: The server, by definition, uses ``NSPORT 7001``. Be considerate of that when initialising the storage servers.
+(Note: The server uses port 7001 by default for the naming server. Make sure to consider this when setting up storage servers.)
+
+## Developers
+- Himanshu Singh
+- Archit Narwadkar
+- Rohan Rathee
